@@ -10,6 +10,8 @@ import { BookingsModule } from './bookings/bookings.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 
+import { HealthController } from './health/health.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -47,5 +49,8 @@ import { AdminModule } from './admin/admin.module';
 
     AdminModule,
   ],
+
+  // 👇 AQUÍ ESTÁ LA CLAVE
+  controllers: [HealthController],
 })
 export class AppModule {}
