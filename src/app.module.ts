@@ -18,12 +18,17 @@ import { AdminModule } from './admin/admin.module';
 
     TypeOrmModule.forRoot({
       type: 'postgres',
-      url: process.env.DATABASE_URL,
+      url:
+        process.env.DATABASE_URL ??
+        (() => {
+          throw new Error('DATABASE_URL is not defined');
+        })(),
       autoLoadEntities: true,
-      synchronize: false, // SOLO DESARROLLO
-      ssl: {
-        rejectUnauthorized: false,
-      },
+      synchronize: false,
+      ssl:
+        process.env.NODE_ENV === 'production'
+          ? { rejectUnauthorized: false }
+          : false,
     }),
 
     PlansModule,
