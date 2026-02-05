@@ -108,7 +108,7 @@ export class BookingsService {
     return this.bookingRepo.save(booking);
   }
 
-  // ✅ NUEVO: Planificar semana
+  // ✅ NUEVO: Planificar/Actualizar semana (SYNC)
   async planWeekForStudent(userId: number, dto: PlanWeekDto) {
     const student = await this.studentsService.findByUserId(userId);
 
@@ -116,29 +116,132 @@ export class BookingsService {
       throw new BadRequestException('Student not found or inactive');
     }
 
+    // Solo planes con profesor
+    if (!student.plan.requiresTeacher) {
+      throw new BadRequestException(
+        'Este plan no usa agenda con profesor. Debes guardar días y horario en tu perfil.',
+      );
+    }
+
+    if (!student.teacher || !student.fixedHour) {
+      throw new BadRequestException(
+        'Alumno sin profesor u horario fijo asignado',
+      );
+    }
+
+    if (!dto.days || dto.days.length === 0) {
+      throw new BadRequestException('Debes seleccionar al menos 1 día');
+    }
+
     if (dto.days.length > student.plan.classesPerWeek) {
       throw new BadRequestException('Weekly limit exceeded');
     }
 
-    const created: Booking[] = [];
+    // Slot fijo del alumno (profesor + hora fija)
+    const slot = await this.slotsService.findByTeacherAndHour(
+      student.teacher.id,
+      student.fixedHour,
+    );
 
-    for (const day of dto.days) {
-      const date = this.resolveDate(dto.weekStart, day);
-
-      const slot = await this.slotsService.findByTeacherAndHour(
-        student.teacher.id,
-        student.fixedHour,
-      );
-
-      if (!slot) {
-        throw new BadRequestException('Schedule slot not found');
-      }
-
-      const booking = await this.create(student.id, slot.id, date);
-      created.push(booking);
+    if (!slot) {
+      throw new BadRequestException('Schedule slot not found');
     }
 
-    return created;
+    // Semana LUN-SAB (tu app trabaja L-S)
+    const weekStart = new Date(`${dto.weekStart}T00:00:00`);
+    const monday = this.normalizeToMonday(weekStart);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const from = monday.toISOString().slice(0, 10);
+    const to = saturday.toISOString().slice(0, 10);
+
+    // Fechas seleccionadas (YYYY-MM-DD)
+    const selectedDates = dto.days
+      .map((day) => this.resolveDate(from, day)) // from ya es lunes
+      .map((d) => d); // iso date
+
+    // Evitar duplicados si viene repetido
+    const selectedSet = new Set(selectedDates);
+
+    // Traer bookings existentes de ESA semana para ese slot fijo
+    const existing = await this.bookingRepo.find({
+      where: {
+        student: { id: student.id },
+        slot: { id: slot.id },
+        date: Between(from, to),
+      },
+      relations: ['student', 'slot'],
+    });
+
+    const existingByDate = new Map(existing.map((b) => [b.date, b]));
+
+    // 1) DELETE: los que existen pero ya no están seleccionados
+    const toDeleteIds = existing
+      .filter((b) => !selectedSet.has(b.date))
+      .map((b) => b.id);
+
+    if (toDeleteIds.length) {
+      await this.bookingRepo.delete(toDeleteIds);
+    }
+
+    // 2) INSERT: los que están seleccionados pero no existen
+    const toInsertDates = Array.from(selectedSet).filter(
+      (d) => !existingByDate.has(d),
+    );
+
+    if (toInsertDates.length) {
+      const values = toInsertDates.map((date) => ({
+        student: { id: student.id },
+        slot: { id: slot.id },
+        date,
+        status: BookingStatus.BOOKED,
+      }));
+
+      // Insert masivo (no revienta si ya existen porque filtramos antes)
+      await this.bookingRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Booking)
+        .values(values as any)
+        .execute();
+    }
+
+    // 3) Respuesta final: devolver cómo quedó la semana
+    const final = await this.bookingRepo.find({
+      where: {
+        student: { id: student.id },
+        slot: { id: slot.id },
+        date: Between(from, to),
+      },
+      relations: [
+        'student',
+        'student.user',
+        'slot',
+        'slot.teacher',
+        'slot.teacher.user',
+      ],
+      order: { date: 'ASC' as any },
+    });
+
+    return {
+      ok: true,
+      from,
+      to,
+      kept: existing.filter((b) => selectedSet.has(b.date)).length,
+      deleted: toDeleteIds.length,
+      created: toInsertDates.length,
+      items: final,
+    };
+  }
+
+  // Helper: normaliza una fecha a LUNES de esa semana
+  private normalizeToMonday(d: Date): Date {
+    const copy = new Date(d);
+    const day = copy.getDay(); // 0=Dom,1=Lun...
+    const diff = (day + 6) % 7; // Lun =>0, Mar=>1,... Dom=>6
+    copy.setDate(copy.getDate() - diff);
+    return new Date(copy.getFullYear(), copy.getMonth(), copy.getDate());
   }
 
   // ===== Helpers privados =====

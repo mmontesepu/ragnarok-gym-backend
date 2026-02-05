@@ -10,12 +10,16 @@ export class PlansService {
     private readonly planRepository: Repository<Plan>,
   ) {}
 
-  create(name: string, classesPerWeek: number) {
-    const plan = this.planRepository.create({
-      name,
-      classesPerWeek,
-    });
-
+  create(data: {
+    name: string;
+    classesPerWeek: number;
+    requiresTeacher: boolean;
+    weekdayStartHour?: string;
+    weekdayEndHour?: string;
+    saturdayStartHour?: string;
+    saturdayEndHour?: string;
+  }) {
+    const plan = this.planRepository.create(data);
     return this.planRepository.save(plan);
   }
 

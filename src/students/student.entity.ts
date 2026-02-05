@@ -34,7 +34,10 @@ export class Student {
   @ManyToOne(() => Plan, { eager: true })
   plan: Plan;
 
-  @ManyToOne(() => Teacher, (teacher) => teacher.students, { eager: true })
+  @ManyToOne(() => Teacher, (teacher) => teacher.students, {
+    eager: true,
+    nullable: true, // ✅
+  })
   teacher: Teacher;
 
   @Column({
@@ -52,7 +55,7 @@ export class Student {
   })
   weekDays: WeekDay[];
 
-  @Column()
+  @Column({ nullable: true }) // ✅
   fixedHour: string;
 
   @Column({ default: true })

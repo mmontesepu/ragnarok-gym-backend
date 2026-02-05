@@ -17,9 +17,13 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // MVP: password plano (luego hash)
     if (user.password !== password) {
       throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    // 🔒 BLOQUEO REAL AQUÍ
+    if (!user.active) {
+      throw new UnauthorizedException('Cuenta bloqueada o plan vencido');
     }
 
     const payload = {

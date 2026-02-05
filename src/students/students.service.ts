@@ -13,6 +13,9 @@ import { TeachersService } from '../teachers/teachers.service';
 import { StudentTurn } from './student.entity';
 import { CreateStudentAdminDto } from './dto/create-student-admin.dto';
 import { User } from '../users/user.entity';
+import { Teacher } from '../teachers/teacher.entity';
+import { WeekDay } from './week-day.enum';
+import { FreeSchedule } from '../free-schedules/free-schedule.entity';
 
 @Injectable()
 export class StudentsService {
@@ -23,6 +26,8 @@ export class StudentsService {
     private readonly plansService: PlansService,
     private readonly teachersService: TeachersService,
     private readonly dataSource: DataSource, // 👈 NUEVO (CLAVE)
+    @InjectRepository(FreeSchedule) // ✅ ESTE FALTABA O ESTABA MAL
+    private readonly freeScheduleRepo: Repository<FreeSchedule>,
   ) {}
 
   // ======================================================
@@ -88,25 +93,34 @@ export class StudentsService {
         throw new BadRequestException('Plan not found');
       }
 
-      // 3️⃣ VALIDAR PROFESOR
-      const teacher = await this.teachersService.findOne(dto.teacherId);
-      if (!teacher) {
-        throw new BadRequestException('Teacher not found');
-      }
+      let teacher: Teacher | null = null;
 
-      // 4️⃣ VALIDAR CUPO HORARIO
-      const count = await queryRunner.manager.count(Student, {
-        where: {
-          teacher: { id: dto.teacherId },
-          fixedHour: dto.fixedHour,
-          active: true,
-        },
-      });
+      // 3️⃣ VALIDACIONES SOLO SI EL PLAN REQUIERE PROFESOR
+      if (plan.requiresTeacher) {
+        if (!dto.teacherId || !dto.fixedHour) {
+          throw new BadRequestException(
+            'Este plan requiere profesor y horario',
+          );
+        }
 
-      if (count >= 3) {
-        throw new BadRequestException(
-          'Este horario ya tiene el máximo de 3 alumnos',
-        );
+        teacher = await this.teachersService.findOne(dto.teacherId);
+        if (!teacher) {
+          throw new BadRequestException('Teacher not found');
+        }
+
+        const count = await queryRunner.manager.count(Student, {
+          where: {
+            teacher: { id: dto.teacherId },
+            fixedHour: dto.fixedHour,
+            active: true,
+          },
+        });
+
+        if (count >= 5) {
+          throw new BadRequestException(
+            'Este horario ya tiene el máximo de 5 alumnos',
+          );
+        }
       }
 
       // 5️⃣ CREAR USER (MISMA TRANSACCIÓN)
@@ -121,15 +135,16 @@ export class StudentsService {
 
       // 6️⃣ CREAR STUDENT (MISMA TRANSACCIÓN)
       const student = queryRunner.manager.create(Student, {
-        user,
-        plan,
-        teacher,
+        user: user,
+        plan: plan,
+        teacher: plan.requiresTeacher ? teacher : null,
         turn: dto.turn,
-        fixedHour: dto.fixedHour,
+        fixedHour: plan.requiresTeacher ? dto.fixedHour : null,
+        weekDays: plan.requiresTeacher ? null : [], // 👈 AÑADIR
         active: true,
         firstName: dto.firstName,
         lastName: dto.lastName,
-      });
+      } as Partial<Student>);
 
       await queryRunner.manager.save(student);
 
@@ -149,10 +164,22 @@ export class StudentsService {
   // ======================================================
   // OTROS MÉTODOS — SIN CAMBIOS
   // ======================================================
-  findAll() {
-    return this.studentRepo.find({
-      relations: ['user', 'plan', 'teacher'],
-    });
+  async findAll(search?: string) {
+    const qb = this.studentRepo
+      .createQueryBuilder('student')
+      .leftJoinAndSelect('student.user', 'user')
+      .leftJoinAndSelect('student.plan', 'plan')
+      .leftJoinAndSelect('student.teacher', 'teacher');
+
+    if (search) {
+      qb.andWhere(
+        `(LOWER(student.firstName) ILIKE :search 
+        OR LOWER(student.lastName) ILIKE :search)`,
+        { search: `%${search.toLowerCase()}%` },
+      );
+    }
+
+    return qb.getMany();
   }
 
   findOne(id: number) {
@@ -163,16 +190,70 @@ export class StudentsService {
   }
 
   async toggleActive(studentId: number) {
-    const student = await this.studentRepo.findOne({
-      where: { id: studentId },
-    });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!student) {
-      throw new NotFoundException('Student not found');
+    try {
+      // Traer student con lo necesario para decidir qué limpiar
+      const student = await queryRunner.manager.findOne(Student, {
+        where: { id: studentId },
+        relations: ['user', 'plan', 'teacher'],
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student not found');
+      }
+
+      const willBeActive = !student.active;
+
+      // 1) Toggle student + user
+      student.active = willBeActive;
+
+      if (student.user) {
+        student.user.active = willBeActive;
+        await queryRunner.manager.save(student.user);
+      }
+
+      // 2) Si se está BLOQUEANDO → limpiar “ocupación”
+      if (!willBeActive) {
+        const todayIso = new Date().toISOString().slice(0, 10);
+
+        // 2A) Borrar bookings futuros (para cualquier caso, es seguro)
+        await queryRunner.manager
+          .createQueryBuilder()
+          .delete()
+          .from('bookings')
+          .where('"studentId" = :studentId', { studentId: student.id })
+          .andWhere('"date" >= :today', { today: todayIso })
+          .execute();
+
+        // 2B) Borrar free schedule futuro (por si es plan libre)
+        await queryRunner.manager
+          .createQueryBuilder()
+          .delete()
+          .from(FreeSchedule)
+          .where('"studentId" = :studentId', { studentId: student.id })
+          .andWhere('"date" >= :today', { today: todayIso })
+          .execute();
+      }
+
+      // 3) Guardar student
+      const saved = await queryRunner.manager.save(student);
+
+      await queryRunner.commitTransaction();
+
+      return {
+        ok: true,
+        studentId: saved.id,
+        active: saved.active,
+      };
+    } catch (e) {
+      await queryRunner.rollbackTransaction();
+      throw e;
+    } finally {
+      await queryRunner.release();
     }
-
-    student.active = !student.active;
-    return this.studentRepo.save(student);
   }
 
   async findByUserId(userId: number) {
@@ -180,5 +261,60 @@ export class StudentsService {
       where: { user: { id: userId } },
       relations: ['user', 'plan', 'teacher'],
     });
+  }
+
+  async updateStudentSchedule(
+    userId: number,
+    weekDays: WeekDay[],
+    fixedHour: string,
+  ) {
+    const student = await this.findByUserId(userId);
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    // 🔒 Solo planes SIN profesor
+    if (student.plan.requiresTeacher) {
+      throw new BadRequestException('Este plan no permite modificar horario');
+    }
+
+    // 🔒 Validar cantidad de días
+    if (weekDays.length !== student.plan.classesPerWeek) {
+      throw new BadRequestException(
+        `Debes seleccionar exactamente ${student.plan.classesPerWeek} días`,
+      );
+    }
+
+    student.weekDays = weekDays;
+    student.fixedHour = fixedHour;
+
+    return this.studentRepo.save(student);
+  }
+
+  async addFreeSchedule(userId: number, date: string, hour: string) {
+    const student = await this.findByUserId(userId);
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    if (student.plan.requiresTeacher) {
+      throw new BadRequestException('Este plan no permite agenda libre');
+    }
+
+    await this.freeScheduleRepo
+      .createQueryBuilder()
+      .insert()
+      .into(FreeSchedule)
+      .values({
+        studentId: student.id, // 👈 OJO: NO pasar student
+        date,
+        hour,
+      })
+      .onConflict('("studentId","date") DO UPDATE SET "hour" = EXCLUDED."hour"')
+      .execute();
+
+    return { ok: true };
   }
 }

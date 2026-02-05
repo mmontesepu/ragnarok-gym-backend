@@ -10,4 +10,22 @@ export class Plan {
 
   @Column()
   classesPerWeek: number;
+
+  // 🔹 NUEVO: ¿requiere profesor?
+  @Column({ default: true })
+  requiresTeacher: boolean;
+
+  // 🔹 Horarios permitidos (L–V)
+  @Column({ nullable: true })
+  weekdayStartHour: string;
+
+  @Column({ nullable: true })
+  weekdayEndHour: string;
+
+  // 🔹 Horarios permitidos (Sábado)
+  @Column({ nullable: true })
+  saturdayStartHour: string;
+
+  @Column({ nullable: true })
+  saturdayEndHour: string;
 }

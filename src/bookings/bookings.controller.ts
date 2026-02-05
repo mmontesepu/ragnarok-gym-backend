@@ -47,7 +47,11 @@ export class BookingsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.TEACHER)
   @Patch(':id/attended')
-  markAttended(@Param('id') id: number) {
+  markAttended(@Param('id') id: number, @Req() req) {
+    console.log('🔥 PATCH ATTENDED');
+    console.log('USER:', req.user);
+    console.log('BOOKING ID:', id);
+
     return this.bookingsService.markAttended(+id);
   }
 
@@ -64,6 +68,6 @@ export class BookingsController {
   @Roles(UserRole.TEACHER)
   @Get('teacher/daily')
   getTeacherDailySchedule(@Req() req, @Query('date') date: string) {
-    return this.bookingsService.getTeacherDailySchedule(req.user.sub, date);
+    return this.bookingsService.getTeacherDailySchedule(req.user.userId, date);
   }
 }

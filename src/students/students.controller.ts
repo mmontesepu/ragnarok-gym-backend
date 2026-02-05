@@ -3,9 +3,11 @@ import {
   Get,
   Post,
   Patch,
+  Query,
   Body,
   Param,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { StudentsService } from './students.service';
 import { StudentTurn } from './student.entity';
@@ -16,6 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/user-role.enum';
+import { WeekDay } from './week-day.enum';
 
 @Controller('students')
 export class StudentsController {
@@ -45,8 +48,8 @@ export class StudentsController {
 
   // ⚠️ LISTADO GENERAL (por ahora público)
   @Get()
-  findAll() {
-    return this.studentsService.findAll();
+  findAll(@Query('search') search?: string) {
+    return this.studentsService.findAll(search);
   }
 
   // 🔐 SOLO ADMIN — CREAR ALUMNO DESDE PANEL
@@ -63,5 +66,45 @@ export class StudentsController {
   @Patch(':id/toggle-active')
   toggleActive(@Param('id') id: number) {
     return this.studentsService.toggleActive(+id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/schedule')
+  updateMySchedule(
+    @Req() req,
+    @Body()
+    body: {
+      weekDays: WeekDay[];
+      fixedHour: string;
+    },
+  ) {
+    return this.studentsService.updateStudentSchedule(
+      req.user.userId,
+      body.weekDays,
+      body.fixedHour,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  getMe(@Req() req) {
+    return this.studentsService.findByUserId(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/free-schedule')
+  addFreeSchedule(
+    @Req() req,
+    @Body()
+    body: {
+      date: string;
+      hour: string;
+    },
+  ) {
+    return this.studentsService.addFreeSchedule(
+      req.user.userId,
+      body.date,
+      body.hour,
+    );
   }
 }

@@ -20,7 +20,7 @@ export class ScheduleSlot {
   @Column()
   hour: string; // "18:00"
 
-  @Column({ default: 3 })
+  @Column({ default: 5 })
   maxCapacity: number;
 
   @Column({ default: 0 })

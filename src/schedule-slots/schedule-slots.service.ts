@@ -82,7 +82,7 @@ export class ScheduleSlotsService {
           teacher,
           turn: teacher.turn,
           hour: hourLabel,
-          maxCapacity: 3,
+          maxCapacity: 5,
           currentCapacity: 0,
           active: true,
         }),

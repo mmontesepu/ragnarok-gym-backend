@@ -4,9 +4,9 @@ export class CreateStudentAdminDto {
   email: string;
   password: string;
   planId: number;
-  teacherId: number;
+  teacherId?: number; // ✅ opcional
   turn: StudentTurn;
-  fixedHour: string;
+  fixedHour?: string; // ✅ opcional
   firstName: string;
   lastName: string;
 }

@@ -11,9 +11,14 @@ export class PlansController {
     body: {
       name: string;
       classesPerWeek: number;
+      requiresTeacher: boolean;
+      weekdayStartHour?: string;
+      weekdayEndHour?: string;
+      saturdayStartHour?: string;
+      saturdayEndHour?: string;
     },
   ) {
-    return this.plansService.create(body.name, body.classesPerWeek);
+    return this.plansService.create(body);
   }
 
   @Get()

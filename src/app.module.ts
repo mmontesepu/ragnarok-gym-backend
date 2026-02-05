@@ -9,28 +9,19 @@ import { ScheduleSlotsModule } from './schedule-slots/schedule-slots.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
-
-import { HealthController } from './health/health.controller';
+import { ScheduleModule } from './schedule/schedule.module';
+import { FreeScheduleModule } from './free-schedules/free-schedule.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
 
     TypeOrmModule.forRoot({
       type: 'postgres',
-      url:
-        process.env.DATABASE_URL ??
-        (() => {
-          throw new Error('DATABASE_URL is not defined');
-        })(),
+      url: process.env.DATABASE_URL,
       autoLoadEntities: true,
-      synchronize: false,
-      ssl:
-        process.env.NODE_ENV === 'production'
-          ? { rejectUnauthorized: false }
-          : false,
+      synchronize: true,
+      ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
     }),
 
     PlansModule,
@@ -48,9 +39,10 @@ import { HealthController } from './health/health.controller';
     AuthModule,
 
     AdminModule,
-  ],
 
-  // 👇 AQUÍ ESTÁ LA CLAVE
-  controllers: [HealthController],
+    ScheduleModule,
+
+    FreeScheduleModule,
+  ],
 })
 export class AppModule {}
