@@ -103,7 +103,8 @@ export class FreeScheduleService {
       }
 
       byHour[s.hour].students.push({
-        id: s.student.id,
+        id: s.id, // 👈 ID REAL del free_schedule (CLAVE PARA QR)
+        studentId: s.student.id,
         firstName: s.student.firstName,
         lastName: s.student.lastName,
         planName: s.student.plan?.name ?? 'PLAN',

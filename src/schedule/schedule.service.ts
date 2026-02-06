@@ -170,6 +170,7 @@ export class ScheduleService {
     return {
       date,
       items: free.map((f) => ({
+        id: f.id, // ✅ NECESARIO PARA QR
         date,
         type: 'FREE' as const,
         hour: f.hour,
