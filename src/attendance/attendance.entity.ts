@@ -20,6 +20,6 @@ export class AttendanceToken {
   @Column({ default: false })
   used: boolean;
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }
