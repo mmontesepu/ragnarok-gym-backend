@@ -49,24 +49,35 @@ export class AttendanceService {
   }
 
   async validate(token: string) {
+    console.log('QR RECEIVED =>', token);
+
     const record = await this.tokenRepo.findOne({ where: { token } });
+
+    console.log('RECORD FOUND =>', record);
 
     if (!record) throw new BadRequestException('QR inválido');
     if (record.used) throw new BadRequestException('QR ya usado');
 
     const now = new Date();
+    console.log('NOW =>', now);
+    console.log('CREATED =>', record.createdAt);
 
     const diffMinutes = (now.getTime() - record.createdAt.getTime()) / 60000;
 
-    // ⏱ QR válido por 6 horas (puedes cambiar)
+    console.log('DIFF MIN =>', diffMinutes);
+
     if (diffMinutes > 360) {
       throw new BadRequestException('QR expirado');
     }
 
     if (record.referenceType === 'BOOKING') {
+      console.log('VALIDATING BOOKING ID =>', record.referenceId);
+
       const booking = await this.bookingRepo.findOne({
         where: { id: record.referenceId },
       });
+
+      console.log('BOOKING FOUND =>', booking);
 
       if (!booking) throw new BadRequestException('Reserva no encontrada');
 
@@ -75,11 +86,14 @@ export class AttendanceService {
     }
 
     if (record.referenceType === 'FREE') {
+      console.log('DELETING FREE ID =>', record.referenceId);
       await this.freeRepo.delete(record.referenceId);
     }
 
     record.used = true;
     await this.tokenRepo.save(record);
+
+    console.log('QR VALIDATED OK');
 
     return { ok: true };
   }
