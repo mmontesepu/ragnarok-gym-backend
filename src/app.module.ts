@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { FreeScheduleModule } from './free-schedules/free-schedule.module';
+import { AttendanceModule } from './attendance/attendance.module';
 
 @Module({
   imports: [
@@ -43,6 +44,8 @@ import { FreeScheduleModule } from './free-schedules/free-schedule.module';
     ScheduleModule,
 
     FreeScheduleModule,
+
+    AttendanceModule,
   ],
 })
 export class AppModule {}
