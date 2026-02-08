@@ -19,4 +19,7 @@ export class AttendanceToken {
 
   @Column({ default: false })
   used: boolean;
+
+  @Column({ type: 'timestamp' })
+  createdAt: Date;
 }

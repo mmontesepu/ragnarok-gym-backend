@@ -40,6 +40,7 @@ export class AttendanceService {
       referenceId: refId,
       date,
       token,
+      createdAt: new Date(), // 🔥 CLAVE
     });
 
     await this.tokenRepo.save(record);
@@ -53,10 +54,12 @@ export class AttendanceService {
     if (!record) throw new BadRequestException('QR inválido');
     if (record.used) throw new BadRequestException('QR ya usado');
 
-    const today = new Date().toLocaleDateString('en-CA', {
-      timeZone: 'America/Santiago',
-    });
-    if (record.date !== today) {
+    const now = new Date();
+
+    const diffMinutes = (now.getTime() - record.createdAt.getTime()) / 60000;
+
+    // ⏱ QR válido por 6 horas (puedes cambiar)
+    if (diffMinutes > 360) {
       throw new BadRequestException('QR expirado');
     }
 
