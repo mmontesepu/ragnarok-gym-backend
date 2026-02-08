@@ -48,20 +48,30 @@ export class AttendanceService {
     return { token }; // 👈 CLAVE
   }
 
-  async validate(token: any) {
-    // ============================
-    // NORMALIZAR TOKEN (FIX REAL)
-    // ============================
-    const realToken = typeof token === 'string' ? token : token.token;
+  async validate(raw: any) {
+    console.log('RAW TOKEN =>', raw);
 
-    console.log('RAW TOKEN =>', token);
-    console.log('REAL TOKEN =>', realToken);
+    let token: string;
 
-    // ============================
-    // BUSCAR REGISTRO
-    // ============================
+    if (typeof raw === 'string') {
+      token = raw;
+    } else if (typeof raw?.token === 'string') {
+      token = raw.token;
+    } else {
+      throw new BadRequestException('Formato QR inválido');
+    }
+
+    // 🔥 limpiar basura tipo "{token:...}"
+    token = token
+      .replace('{', '')
+      .replace('}', '')
+      .replace('token:', '')
+      .trim();
+
+    console.log('CLEAN TOKEN =>', token);
+
     const record = await this.tokenRepo.findOne({
-      where: { token: realToken },
+      where: { token },
     });
 
     console.log('RECORD FOUND =>', record);
@@ -69,33 +79,17 @@ export class AttendanceService {
     if (!record) throw new BadRequestException('QR inválido');
     if (record.used) throw new BadRequestException('QR ya usado');
 
-    // ============================
-    // VALIDAR EXPIRACIÓN (6 HORAS)
-    // ============================
-    const now = new Date();
-
-    console.log('NOW =>', now);
-    console.log('CREATED =>', record.createdAt);
-
-    const diffMinutes = (now.getTime() - record.createdAt.getTime()) / 60000;
-
-    console.log('DIFF MIN =>', diffMinutes);
+    // ⏱ expiración 6 horas
+    const diffMinutes = (Date.now() - record.createdAt.getTime()) / 60000;
 
     if (diffMinutes > 360) {
       throw new BadRequestException('QR expirado');
     }
 
-    // ============================
-    // CASO CON PROFESOR
-    // ============================
     if (record.referenceType === 'BOOKING') {
-      console.log('VALIDATING BOOKING ID =>', record.referenceId);
-
       const booking = await this.bookingRepo.findOne({
         where: { id: record.referenceId },
       });
-
-      console.log('BOOKING FOUND =>', booking);
 
       if (!booking) throw new BadRequestException('Reserva no encontrada');
 
@@ -103,22 +97,14 @@ export class AttendanceService {
       await this.bookingRepo.save(booking);
     }
 
-    // ============================
-    // CASO PLAN LIBRE
-    // ============================
     if (record.referenceType === 'FREE') {
-      console.log('DELETING FREE ID =>', record.referenceId);
-
       await this.freeRepo.delete(record.referenceId);
     }
 
-    // ============================
-    // MARCAR TOKEN USADO
-    // ============================
     record.used = true;
     await this.tokenRepo.save(record);
 
-    console.log('QR VALIDATED OK');
+    console.log('✅ QR VALIDATED');
 
     return { ok: true };
   }
