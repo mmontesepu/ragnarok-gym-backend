@@ -18,7 +18,8 @@ export class AttendanceController {
   @Post('validate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  validate(@Body() dto: { token: string }) {
+  validate(@Req() req, @Body() dto: { token: string }) {
+    console.log('USER =>', req.user);
     return this.service.validate(dto.token);
   }
 
