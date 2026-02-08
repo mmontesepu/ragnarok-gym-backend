@@ -49,6 +49,7 @@ export class AttendanceService {
   }
 
   async validate(token: string) {
+    console.log('TOKEN STRING =>', token);
     console.log('QR RECEIVED =>', token);
 
     const record = await this.tokenRepo.findOne({ where: { token } });

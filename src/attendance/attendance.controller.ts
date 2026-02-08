@@ -18,8 +18,10 @@ export class AttendanceController {
   @Post('validate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  validate(@Body('token') token: string) {
-    return this.service.validate(token);
+  validate(@Body() body: any) {
+    console.log('QR RECEIVED =>', body);
+
+    return this.service.validate(body.token);
   }
 
   // =====================================================
