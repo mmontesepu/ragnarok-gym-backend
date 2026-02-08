@@ -53,7 +53,9 @@ export class AttendanceService {
     if (!record) throw new BadRequestException('QR inválido');
     if (record.used) throw new BadRequestException('QR ya usado');
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'America/Santiago',
+    });
     if (record.date !== today) {
       throw new BadRequestException('QR expirado');
     }
