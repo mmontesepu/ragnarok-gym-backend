@@ -48,18 +48,32 @@ export class AttendanceService {
     return { token }; // 👈 CLAVE
   }
 
-  async validate(token: string) {
-    console.log('TOKEN STRING =>', token);
-    console.log('QR RECEIVED =>', token);
+  async validate(token: any) {
+    // ============================
+    // NORMALIZAR TOKEN (FIX REAL)
+    // ============================
+    const realToken = typeof token === 'string' ? token : token.token;
 
-    const record = await this.tokenRepo.findOne({ where: { token } });
+    console.log('RAW TOKEN =>', token);
+    console.log('REAL TOKEN =>', realToken);
+
+    // ============================
+    // BUSCAR REGISTRO
+    // ============================
+    const record = await this.tokenRepo.findOne({
+      where: { token: realToken },
+    });
 
     console.log('RECORD FOUND =>', record);
 
     if (!record) throw new BadRequestException('QR inválido');
     if (record.used) throw new BadRequestException('QR ya usado');
 
+    // ============================
+    // VALIDAR EXPIRACIÓN (6 HORAS)
+    // ============================
     const now = new Date();
+
     console.log('NOW =>', now);
     console.log('CREATED =>', record.createdAt);
 
@@ -71,6 +85,9 @@ export class AttendanceService {
       throw new BadRequestException('QR expirado');
     }
 
+    // ============================
+    // CASO CON PROFESOR
+    // ============================
     if (record.referenceType === 'BOOKING') {
       console.log('VALIDATING BOOKING ID =>', record.referenceId);
 
@@ -86,11 +103,18 @@ export class AttendanceService {
       await this.bookingRepo.save(booking);
     }
 
+    // ============================
+    // CASO PLAN LIBRE
+    // ============================
     if (record.referenceType === 'FREE') {
       console.log('DELETING FREE ID =>', record.referenceId);
+
       await this.freeRepo.delete(record.referenceId);
     }
 
+    // ============================
+    // MARCAR TOKEN USADO
+    // ============================
     record.used = true;
     await this.tokenRepo.save(record);
 
