@@ -287,11 +287,13 @@ export class BookingsService {
       if (!map.has(hour)) {
         map.set(hour, {
           hour,
-          teacher: {
-            id: b.student.teacher.id,
-            firstName: b.student.teacher.firstName,
-            lastName: b.student.teacher.lastName,
-          },
+          teacher: b.student.teacher
+            ? {
+                id: b.student.teacher.id,
+                firstName: b.student.teacher.firstName,
+                lastName: b.student.teacher.lastName,
+              }
+            : null,
           students: [],
         });
       }

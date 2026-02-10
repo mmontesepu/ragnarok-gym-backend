@@ -1,9 +1,9 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { FreeSchedule } from './free-schedule.entity';
 import { QueryFailedError } from 'typeorm';
 import { StudentsService } from '../students/students.service'; // ✅ IMPORT CLAVE
+import { FreeSchedule, FreeScheduleStatus } from './free-schedule.entity';
 
 @Injectable()
 export class FreeScheduleService {
@@ -19,14 +19,23 @@ export class FreeScheduleService {
         .createQueryBuilder()
         .insert()
         .into(FreeSchedule)
-        .values({ studentId, date, hour })
+        .values({
+          studentId,
+          date,
+          hour,
+          status: FreeScheduleStatus.BOOKED,
+          attendedAt: null,
+        })
         .execute();
 
       return { ok: true, action: 'insert' };
     } catch (e) {
       if (e instanceof QueryFailedError && (e as any).code === '23505') {
         // 🔁 DUPLICADO → UPDATE
-        await this.repo.update({ studentId, date }, { hour });
+        await this.repo.update(
+          { studentId, date },
+          { hour, status: FreeScheduleStatus.BOOKED, attendedAt: null },
+        );
 
         return { ok: true, action: 'update' };
       }
@@ -70,9 +79,11 @@ export class FreeScheduleService {
     }
 
     const records = days.map((d) => ({
-      studentId, // ✅ GARANTIZADO
+      studentId,
       date: d.date,
       hour: d.hour,
+      status: FreeScheduleStatus.BOOKED,
+      attendedAt: null,
     }));
 
     await this.repo
@@ -103,11 +114,13 @@ export class FreeScheduleService {
       }
 
       byHour[s.hour].students.push({
-        id: s.id, // 👈 ID REAL del free_schedule (CLAVE PARA QR)
+        id: s.id, // freeId real
         studentId: s.student.id,
         firstName: s.student.firstName,
         lastName: s.student.lastName,
         planName: s.student.plan?.name ?? 'PLAN',
+        status: s.status, // ✅
+        free: true, // ✅ para que tu UI lo detecte
       });
     }
 

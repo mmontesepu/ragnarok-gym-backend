@@ -16,6 +16,7 @@ import { User } from '../users/user.entity';
 import { Teacher } from '../teachers/teacher.entity';
 import { WeekDay } from './week-day.enum';
 import { FreeSchedule } from '../free-schedules/free-schedule.entity';
+import { UpdateStudentAdminDto } from './dto/update-student-admin.dto';
 
 @Injectable()
 export class StudentsService {
@@ -316,5 +317,71 @@ export class StudentsService {
       .execute();
 
     return { ok: true };
+  }
+
+  async updateFromAdmin(studentId: number, dto: UpdateStudentAdminDto) {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: ['user', 'plan', 'teacher'],
+    });
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    if (dto.firstName !== undefined) student.firstName = dto.firstName;
+    if (dto.lastName !== undefined) student.lastName = dto.lastName;
+
+    if (dto.planId) {
+      const plan = await this.plansService.findOne(dto.planId);
+      if (!plan) throw new BadRequestException('Plan not found');
+
+      student.plan = plan;
+
+      if (!plan.requiresTeacher) {
+        student.teacher = null;
+        student.fixedHour = null;
+      }
+    }
+
+    if (student.plan.requiresTeacher) {
+      if (dto.teacherId) {
+        const teacher = await this.teachersService.findOne(dto.teacherId);
+        if (!teacher) throw new BadRequestException('Teacher not found');
+
+        student.teacher = teacher;
+      }
+
+      if (dto.fixedHour) {
+        if (!student.teacher) {
+          throw new BadRequestException('Student has no teacher assigned');
+        }
+
+        const count = await this.studentRepo.count({
+          where: {
+            teacher: { id: student.teacher.id },
+            fixedHour: dto.fixedHour,
+            active: true,
+          },
+        });
+
+        if (count >= 5) {
+          throw new BadRequestException('Horario lleno');
+        }
+
+        student.fixedHour = dto.fixedHour;
+      }
+    }
+
+    if (dto.active !== undefined) {
+      student.active = dto.active;
+
+      if (student.user) {
+        student.user.active = dto.active;
+        await this.dataSource.getRepository(User).save(student.user);
+      }
+    }
+
+    return this.studentRepo.save(student);
   }
 }

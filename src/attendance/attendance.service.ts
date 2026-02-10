@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AttendanceToken } from './attendance.entity';
 import { Booking, BookingStatus } from '../bookings/booking.entity';
 import { FreeSchedule } from '../free-schedules/free-schedule.entity';
+import { FreeScheduleStatus } from '../free-schedules/free-schedule.entity';
 
 @Injectable()
 export class AttendanceService {
@@ -98,7 +99,16 @@ export class AttendanceService {
     }
 
     if (record.referenceType === 'FREE') {
-      await this.freeRepo.delete(record.referenceId);
+      const free = await this.freeRepo.findOne({
+        where: { id: record.referenceId },
+      });
+
+      if (!free) throw new BadRequestException('Reserva libre no encontrada');
+
+      free.status = FreeScheduleStatus.ATTENDED;
+      free.attendedAt = new Date();
+
+      await this.freeRepo.save(free);
     }
 
     record.used = true;

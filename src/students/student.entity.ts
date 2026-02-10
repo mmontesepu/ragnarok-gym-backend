@@ -38,7 +38,7 @@ export class Student {
     eager: true,
     nullable: true, // ✅
   })
-  teacher: Teacher;
+  teacher: Teacher | null;
 
   @Column({
     type: 'enum',
@@ -55,8 +55,8 @@ export class Student {
   })
   weekDays: WeekDay[];
 
-  @Column({ nullable: true }) // ✅
-  fixedHour: string;
+  @Column({ type: 'varchar', nullable: true })
+  fixedHour: string | null;
 
   @Column({ default: true })
   active: boolean;

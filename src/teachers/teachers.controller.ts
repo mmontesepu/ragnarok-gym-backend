@@ -6,6 +6,8 @@ import {
   Req,
   UseGuards,
   Query,
+  Patch,
+  Param,
 } from '@nestjs/common';
 import { TeachersService } from './teachers.service';
 import { TeacherTurn } from './teacher.entity';
@@ -13,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/user-role.enum';
+import { UpdateTeacherAdminDto } from './dto/update-teacher-admin.dto';
 
 @Controller('teachers')
 export class TeachersController {
@@ -21,6 +24,8 @@ export class TeachersController {
   // ===============================
   // 👨‍🏫 CREAR PROFESOR (ADMIN)
   // ===============================
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Post()
   create(
     @Body()
@@ -42,9 +47,31 @@ export class TeachersController {
   // ===============================
   // 📋 LISTAR PROFESORES (ADMIN)
   // ===============================
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Get()
-  findAll() {
-    return this.teachersService.findAll();
+  findAll(@Query('search') search?: string) {
+    return this.teachersService.findAll(search);
+  }
+
+  // ===============================
+  // ✏️ EDITAR PROFESOR (ADMIN)
+  // ===============================
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id')
+  updateTeacher(@Param('id') id: number, @Body() dto: UpdateTeacherAdminDto) {
+    return this.teachersService.updateFromAdmin(+id, dto);
+  }
+
+  // ===============================
+  // 🚫 BLOQUEAR / ACTIVAR (ADMIN)
+  // ===============================
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/toggle-active')
+  toggleActive(@Param('id') id: number) {
+    return this.teachersService.toggleActive(+id);
   }
 
   // ===============================
@@ -54,7 +81,7 @@ export class TeachersController {
   @Roles(UserRole.TEACHER)
   @Get('my-students')
   getMyStudents(@Req() req) {
-    const userId = req.user.sub; // viene del JWT
+    const userId = req.user.sub;
     return this.teachersService.getMyStudents(userId);
   }
 

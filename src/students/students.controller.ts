@@ -12,6 +12,7 @@ import {
 import { StudentsService } from './students.service';
 import { StudentTurn } from './student.entity';
 import { CreateStudentAdminDto } from './dto/create-student-admin.dto';
+import { UpdateStudentAdminDto } from './dto/update-student-admin.dto';
 
 // 🔐 AUTH & ROLES
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -106,5 +107,12 @@ export class StudentsController {
       body.date,
       body.hour,
     );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id')
+  updateStudent(@Param('id') id: number, @Body() dto: UpdateStudentAdminDto) {
+    return this.studentsService.updateFromAdmin(+id, dto);
   }
 }
