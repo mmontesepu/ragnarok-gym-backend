@@ -8,6 +8,7 @@ import {
   Req,
   Param,
   Query,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';

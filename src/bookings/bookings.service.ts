@@ -18,6 +18,16 @@ export class BookingsService {
   ) {}
 
   async create(studentId: number, slotId: number, date: string) {
+    // 1. VALIDAR FECHA PASADA
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const bookingDate = new Date(`${date}T00:00:00`);
+
+    if (bookingDate < today) {
+      throw new BadRequestException('Cannot book past dates');
+    }
+
     const student = await this.studentsService.findOne(studentId);
     if (!student || !student.active) {
       throw new BadRequestException('Student not valid');
@@ -160,6 +170,19 @@ export class BookingsService {
     const selectedDates = dto.days
       .map((day) => this.resolveDate(from, day)) // from ya es lunes
       .map((d) => d); // iso date
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (const date of selectedDates) {
+      const d = new Date(`${date}T00:00:00`);
+
+      if (d < today) {
+        throw new BadRequestException(
+          `No puedes agendar fechas pasadas (${date})`,
+        );
+      }
+    }
 
     // Evitar duplicados si viene repetido
     const selectedSet = new Set(selectedDates);
