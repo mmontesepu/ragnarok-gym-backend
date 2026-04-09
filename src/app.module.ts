@@ -12,6 +12,8 @@ import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { FreeScheduleModule } from './free-schedules/free-schedule.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { SeedService } from './seed/seed.service';
+import { User } from './users/user.entity';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { AttendanceModule } from './attendance/attendance.module';
       synchronize: true,
       ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
     }),
+
+    TypeOrmModule.forFeature([User]),
 
     PlansModule,
 
@@ -47,5 +51,6 @@ import { AttendanceModule } from './attendance/attendance.module';
 
     AttendanceModule,
   ],
+  providers: [SeedService], // 👈 IMPORTANTE
 })
 export class AppModule {}
