@@ -6,7 +6,7 @@ export class CreateStudentAdminDto {
   planId: number;
   teacherId?: number; // ✅ opcional
   turn: StudentTurn;
-  fixedHour?: string; // ✅ opcional
   firstName: string;
   lastName: string;
+  fixedHour?: string;
 }

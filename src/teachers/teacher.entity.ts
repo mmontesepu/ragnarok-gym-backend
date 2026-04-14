@@ -5,13 +5,22 @@ import {
   OneToOne,
   JoinColumn,
   OneToMany,
+  ManyToMany,
+  JoinTable,
 } from 'typeorm';
 import { User } from '../users/user.entity';
 import { Student } from '../students/student.entity';
+import { Plan } from '../plans/plan.entity';
 
 export enum TeacherTurn {
   MORNING = 'MORNING',
   EVENING = 'EVENING',
+}
+
+// 🔥 NUEVO
+export enum TeacherType {
+  PERSONALIZED = 'PERSONALIZED',
+  CLASS = 'CLASS',
 }
 
 @Entity('teachers')
@@ -35,6 +44,20 @@ export class Teacher {
     enumName: 'teacher_turn_enum',
   })
   turn: TeacherTurn;
+
+  // 🔥 NUEVO
+  @Column({
+    type: 'enum',
+    enum: TeacherType,
+    enumName: 'teacher_type_enum',
+    default: TeacherType.PERSONALIZED,
+  })
+  type: TeacherType;
+
+  // 🔥 SOLO PARA CLASS
+  @ManyToMany(() => Plan, { eager: true })
+  @JoinTable()
+  plans: Plan[];
 
   @Column({ default: true })
   active: boolean;

@@ -34,6 +34,8 @@ export class TeachersController {
       firstName: string;
       lastName: string;
       turn: TeacherTurn;
+      type: 'PERSONALIZED' | 'CLASS';
+      planIds?: number[];
     },
   ) {
     return this.teachersService.create(
@@ -41,6 +43,8 @@ export class TeachersController {
       body.firstName,
       body.lastName,
       body.turn,
+      body.type as any,
+      body.planIds,
     );
   }
 

@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Teacher, TeacherTurn } from './teacher.entity';
@@ -13,6 +9,9 @@ import { ScheduleSlotsService } from '../schedule-slots/schedule-slots.service';
 import { Booking } from '../bookings/booking.entity';
 import { UpdateTeacherAdminDto } from './dto/update-teacher-admin.dto';
 import { User } from '../users/user.entity';
+import { TeacherType } from './teacher.entity';
+import { Plan } from '../plans/plan.entity';
+import { In } from 'typeorm';
 
 @Injectable()
 export class TeachersService {
@@ -28,35 +27,90 @@ export class TeachersService {
     private readonly dataSource: DataSource,
   ) {}
 
+  // ===============================
+  // 👨‍🏫 CREAR PROFESOR
+  // ===============================
   async create(
     email: string,
     firstName: string,
     lastName: string,
     turn: TeacherTurn,
+    type: TeacherType,
+    planIds?: number[],
   ) {
-    const user = await this.usersService.create(
-      email,
-      '123456',
-      UserRole.TEACHER,
-    );
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const teacher = this.teacherRepo.create({
-      user,
-      firstName,
-      lastName,
-      turn,
-      active: true,
-    });
+    try {
+      const user = await this.usersService.create(
+        email,
+        '123456',
+        UserRole.TEACHER,
+      );
 
-    const savedTeacher = await this.teacherRepo.save(teacher);
+      let plans: Plan[] = [];
 
-    // 🔥 GENERAR HORARIOS AUTOMÁTICOS
-    await this.scheduleSlotsService.createSlotsForTeacher(savedTeacher);
+      if (type === TeacherType.CLASS) {
+        if (!planIds || planIds.length === 0) {
+          throw new Error('Profesor tipo CLASS debe tener planes');
+        }
 
-    return savedTeacher;
+        const numericPlanIds = planIds.map((id) => Number(id));
+
+        if (numericPlanIds.some((id) => isNaN(id))) {
+          throw new Error('planIds inválidos');
+        }
+
+        plans = await queryRunner.manager.find(Plan, {
+          where: {
+            id: In(numericPlanIds), // 🔥 ESTE ES EL FIX REAL
+          },
+          relations: ['schedules'],
+        });
+      }
+
+      const teacher = this.teacherRepo.create({
+        user,
+        firstName,
+        lastName,
+        turn,
+        type,
+        plans: type === TeacherType.CLASS ? plans : [],
+        active: true,
+      });
+
+      const savedTeacher = await queryRunner.manager.save(teacher);
+
+      await queryRunner.commitTransaction();
+
+      // IMPORTANTE:
+      // PERSONALIZED crea slots por turno
+      if (type === TeacherType.PERSONALIZED) {
+        await this.scheduleSlotsService.createSlotsForTeacher(savedTeacher);
+      }
+
+      // IMPORTANTE:
+      // CLASS crea slots desde los horarios de sus planes
+      if (type === TeacherType.CLASS) {
+        await this.scheduleSlotsService.createSlotsForClassTeacher(
+          savedTeacher,
+          plans,
+        );
+      }
+
+      return savedTeacher;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
-  // ✅ ahora soporta search (igual que alumnos)
+  // ===============================
+  // 📋 LISTAR PROFESORES
+  // ===============================
   async findAll(search?: string) {
     const qb = this.teacherRepo
       .createQueryBuilder('teacher')
@@ -76,6 +130,9 @@ export class TeachersService {
     return qb.getMany();
   }
 
+  // ===============================
+  // 🔍 DETALLE PROFESOR
+  // ===============================
   findOne(id: number) {
     return this.teacherRepo.findOne({
       where: { id },
@@ -83,7 +140,9 @@ export class TeachersService {
     });
   }
 
-  // ✅ EDIT ADMIN
+  // ===============================
+  // ✏️ EDITAR PROFESOR (ADMIN)
+  // ===============================
   async updateFromAdmin(teacherId: number, dto: UpdateTeacherAdminDto) {
     const teacher = await this.teacherRepo.findOne({
       where: { id: teacherId },
@@ -98,6 +157,7 @@ export class TeachersService {
 
     if (dto.active !== undefined) {
       teacher.active = dto.active;
+
       if (teacher.user) {
         teacher.user.active = dto.active;
         await this.dataSource.getRepository(User).save(teacher.user);
@@ -107,7 +167,9 @@ export class TeachersService {
     return this.teacherRepo.save(teacher);
   }
 
-  // ✅ BLOQUEAR/ACTIVAR estilo alumnos
+  // ===============================
+  // 🚫 BLOQUEAR / ACTIVAR
+  // ===============================
   async toggleActive(teacherId: number) {
     const teacher = await this.teacherRepo.findOne({
       where: { id: teacherId },
@@ -124,14 +186,14 @@ export class TeachersService {
       await this.dataSource.getRepository(User).save(teacher.user);
     }
 
-    // (Opcional) si bloqueas profesor, podrías bloquear su agenda futura o algo.
-    // Por ahora: solo active flags, igual que alumnos.
-
     const saved = await this.teacherRepo.save(teacher);
 
     return { ok: true, teacherId: saved.id, active: saved.active };
   }
 
+  // ===============================
+  // 👨‍🎓 ALUMNOS DEL PROFESOR
+  // ===============================
   async getMyStudents(userId: number) {
     const teacher = await this.teacherRepo.findOne({
       where: { user: { id: userId } },
@@ -148,6 +210,9 @@ export class TeachersService {
     });
   }
 
+  // ===============================
+  // 📅 AGENDA DEL PROFESOR
+  // ===============================
   async getMySchedule(userId: number, date: string) {
     const teacher = await this.teacherRepo.findOne({
       where: { user: { id: userId } },

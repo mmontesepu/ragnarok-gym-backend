@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
 import { PlansService } from './plans.service';
+import { PlanType } from './plan.entity';
 
 @Controller('plans')
 export class PlansController {
@@ -11,11 +12,15 @@ export class PlansController {
     body: {
       name: string;
       classesPerWeek: number;
-      requiresTeacher: boolean;
+      type: PlanType;
       weekdayStartHour?: string;
       weekdayEndHour?: string;
       saturdayStartHour?: string;
       saturdayEndHour?: string;
+      schedules?: {
+        dayOfWeek: string;
+        hour: string;
+      }[];
     },
   ) {
     return this.plansService.create(body);

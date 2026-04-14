@@ -35,7 +35,7 @@ export class ScheduleService {
   ) {}
 
   // ======================================================
-  // ENTRY POINT (date OR range)
+  // ENTRY POINT
   // ======================================================
   async getSchedule(
     user: { userId: number; role: string },
@@ -101,25 +101,16 @@ export class ScheduleService {
       relations: ['plan', 'teacher', 'teacher.user', 'user'],
     });
 
-    console.log('[SCHEDULE][STUDENT][FOUND]', {
-      userId,
-      studentId: student?.id,
-      active: student?.active,
-      requiresTeacher: student?.plan?.requiresTeacher,
-      weekDays: student?.weekDays,
-      fixedHour: student?.fixedHour,
-    });
-
     if (!student || !student.active) {
       throw new BadRequestException('Student not found or inactive');
     }
 
-    // ===============================
-    // PLAN CON PROFESOR
-    // ===============================
-    if (student.plan?.requiresTeacher) {
-      console.log('[SCHEDULE][STUDENT][MODE]', 'WITH_TEACHER');
+    const plan = student.plan;
 
+    // ===============================
+    // 🔴 PERSONALIZED
+    // ===============================
+    if (plan.type === 'PERSONALIZED') {
       const bookings = await this.bookingRepo.find({
         where: { date, student: { id: student.id } },
         relations: [
@@ -132,11 +123,26 @@ export class ScheduleService {
         order: { slot: { hour: 'ASC' } as any },
       });
 
-      console.log('[SCHEDULE][BOOKINGS][RESULT]', {
+      return {
         date,
-        studentId: student.id,
-        count: bookings.length,
-        bookingIds: bookings.map((b) => b.id),
+        items: bookings.map((b) => this.mapBookingToItem(b, date)),
+      };
+    }
+
+    // ===============================
+    // 🟣 CLASS
+    // ===============================
+    if (plan.type === 'CLASS') {
+      const bookings = await this.bookingRepo.find({
+        where: { date, student: { id: student.id } },
+        relations: [
+          'student',
+          'student.user',
+          'slot',
+          'slot.teacher',
+          'slot.teacher.user',
+        ],
+        order: { slot: { hour: 'ASC' } as any },
       });
 
       return {
@@ -146,21 +152,14 @@ export class ScheduleService {
     }
 
     // ===============================
-    // PLAN LIBRE (NUEVO MODELO)
+    // 🔵 FREE
     // ===============================
-    console.log('[SCHEDULE][STUDENT][MODE]', 'FREE');
-
     const free = await this.freeScheduleRepo.find({
       where: {
         student: { id: student.id },
         date,
       },
-      relations: ['student'],
     });
-
-    if (!free.length) {
-      return { date, items: [] };
-    }
 
     const studentName =
       `${student.firstName ?? ''} ${student.lastName ?? ''}`.trim() ||
@@ -170,7 +169,7 @@ export class ScheduleService {
     return {
       date,
       items: free.map((f) => ({
-        id: f.id, // ✅ NECESARIO PARA QR
+        id: f.id,
         date,
         type: 'FREE' as const,
         hour: f.hour,
@@ -182,7 +181,7 @@ export class ScheduleService {
         teacherName: null,
 
         bookingId: null,
-        status: null,
+        status: f.status,
       })),
     };
   }
@@ -228,28 +227,9 @@ export class ScheduleService {
       order: { slot: { hour: 'ASC' } as any },
     });
 
-    const bookingItems = bookings.map((b) => this.mapBookingToItem(b, date));
-    const bookedStudentIds = new Set(bookings.map((b) => b.student?.id));
-
-    const freeStudents = await this.studentRepo.find({
-      where: {
-        active: true,
-        plan: { requiresTeacher: false } as any,
-      },
-      relations: ['user', 'plan'],
-    });
-
-    const freeItems: ScheduleItem[] = [];
-    for (const s of freeStudents) {
-      if (bookedStudentIds.has(s.id)) continue;
-      freeItems.push(...this.buildFreeItemsForDate(s, date));
-    }
-
     return {
       date,
-      items: [...bookingItems, ...freeItems].sort((a, b) =>
-        a.hour.localeCompare(b.hour),
-      ),
+      items: bookings.map((b) => this.mapBookingToItem(b, date)),
     };
   }
 
@@ -281,50 +261,5 @@ export class ScheduleService {
       bookingId: b.id ?? null,
       status: b.status ?? null,
     };
-  }
-
-  private buildFreeItemsForDate(
-    student: Student,
-    date: string,
-  ): ScheduleItem[] {
-    if (!student.weekDays || !student.fixedHour) return [];
-
-    const wd = this.dateToWeekDay(date);
-    if (!wd || !student.weekDays.includes(wd)) return [];
-
-    const studentName =
-      `${student.firstName ?? ''} ${student.lastName ?? ''}`.trim() ||
-      student.user?.email ||
-      '-';
-
-    return [
-      {
-        date,
-        type: 'FREE',
-        hour: student.fixedHour,
-
-        studentId: student.id,
-        studentName,
-
-        teacherId: null,
-        teacherName: null,
-
-        bookingId: null,
-        status: null,
-      },
-    ];
-  }
-
-  private dateToWeekDay(date: string): WeekDay | null {
-    const d = new Date(`${date}T00:00:00`);
-    const map: Record<number, WeekDay | null> = {
-      1: WeekDay.MONDAY,
-      2: WeekDay.TUESDAY,
-      3: WeekDay.WEDNESDAY,
-      4: WeekDay.THURSDAY,
-      5: WeekDay.FRIDAY,
-      6: WeekDay.SATURDAY,
-    };
-    return map[d.getDay()] ?? null;
   }
 }

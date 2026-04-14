@@ -79,7 +79,7 @@ export class StudentsService {
     await queryRunner.startTransaction();
 
     try {
-      // 1️⃣ VALIDAR EMAIL ÚNICO
+      // 1️⃣ email único
       const existingUser = await queryRunner.manager.findOne(User, {
         where: { email: dto.email },
       });
@@ -88,26 +88,25 @@ export class StudentsService {
         throw new BadRequestException('Ya existe un usuario con ese email');
       }
 
-      // 2️⃣ VALIDAR PLAN
+      // 2️⃣ plan
       const plan = await this.plansService.findOne(dto.planId);
-      if (!plan) {
-        throw new BadRequestException('Plan not found');
-      }
+      if (!plan) throw new BadRequestException('Plan not found');
 
       let teacher: Teacher | null = null;
+      let fixedHour: string | null = null;
 
-      // 3️⃣ VALIDACIONES SOLO SI EL PLAN REQUIERE PROFESOR
-      if (plan.requiresTeacher) {
+      // ==============================
+      // 🔴 PERSONALIZED
+      // ==============================
+      if (plan.type === 'PERSONALIZED') {
         if (!dto.teacherId || !dto.fixedHour) {
           throw new BadRequestException(
-            'Este plan requiere profesor y horario',
+            'Personalizado requiere profesor y horario',
           );
         }
 
         teacher = await this.teachersService.findOne(dto.teacherId);
-        if (!teacher) {
-          throw new BadRequestException('Teacher not found');
-        }
+        if (!teacher) throw new BadRequestException('Teacher not found');
 
         const count = await queryRunner.manager.count(Student, {
           where: {
@@ -118,13 +117,36 @@ export class StudentsService {
         });
 
         if (count >= 5) {
-          throw new BadRequestException(
-            'Este horario ya tiene el máximo de 5 alumnos',
-          );
+          throw new BadRequestException('Horario lleno');
         }
+
+        fixedHour = dto.fixedHour;
       }
 
-      // 5️⃣ CREAR USER (MISMA TRANSACCIÓN)
+      // ==============================
+      // 🟣 CLASS (🔥 FIX)
+      // ==============================
+      if (plan.type === 'CLASS') {
+        if (!dto.teacherId) {
+          throw new BadRequestException('Clases requieren profesor');
+        }
+
+        teacher = await this.teachersService.findOne(dto.teacherId);
+        if (!teacher) throw new BadRequestException('Teacher not found');
+
+        // 🔥 NO SE ASIGNA fixedHour
+        fixedHour = null;
+      }
+
+      // ==============================
+      // 🔵 FREE
+      // ==============================
+      if (plan.type === 'FREE') {
+        teacher = null;
+        fixedHour = null;
+      }
+
+      // 3️⃣ user
       const user = queryRunner.manager.create(User, {
         email: dto.email,
         password: dto.password,
@@ -134,34 +156,31 @@ export class StudentsService {
 
       await queryRunner.manager.save(user);
 
-      // 6️⃣ CREAR STUDENT (MISMA TRANSACCIÓN)
+      // 4️⃣ student
       const student = queryRunner.manager.create(Student, {
-        user: user,
-        plan: plan,
-        teacher: plan.requiresTeacher ? teacher : null,
+        user,
+        plan,
+        teacher,
         turn: dto.turn,
-        fixedHour: plan.requiresTeacher ? dto.fixedHour : null,
-        weekDays: plan.requiresTeacher ? null : [], // 👈 AÑADIR
+        fixedHour,
+        weekDays: null,
         active: true,
         firstName: dto.firstName,
         lastName: dto.lastName,
-      } as Partial<Student>);
+      } as any);
 
       await queryRunner.manager.save(student);
 
-      // 7️⃣ COMMIT FINAL
       await queryRunner.commitTransaction();
 
       return student;
     } catch (error) {
-      // ❌ ROLLBACK TOTAL (NO QUEDA BASURA)
       await queryRunner.rollbackTransaction();
       throw error;
     } finally {
       await queryRunner.release();
     }
   }
-
   // ======================================================
   // OTROS MÉTODOS — SIN CAMBIOS
   // ======================================================
@@ -275,22 +294,62 @@ export class StudentsService {
       throw new NotFoundException('Student not found');
     }
 
-    // 🔒 Solo planes SIN profesor
-    if (student.plan.requiresTeacher) {
-      throw new BadRequestException('Este plan no permite modificar horario');
+    const plan = student.plan;
+
+    // ==============================
+    // 🔴 PERSONALIZED
+    // ==============================
+    if (plan.type === 'PERSONALIZED') {
+      if (weekDays.length !== plan.classesPerWeek) {
+        throw new BadRequestException(
+          `Debes seleccionar ${plan.classesPerWeek} días`,
+        );
+      }
+
+      // 👉 SOLO guarda días (hora NO cambia)
+      student.weekDays = weekDays;
+
+      return this.studentRepo.save(student);
     }
 
-    // 🔒 Validar cantidad de días
-    if (weekDays.length !== student.plan.classesPerWeek) {
+    // ==============================
+    // 🔵 FREE
+    // ==============================
+    if (plan.type === 'FREE') {
+      if (!fixedHour) {
+        throw new BadRequestException('Debes seleccionar horario');
+      }
+
+      if (weekDays.length !== plan.classesPerWeek) {
+        throw new BadRequestException(
+          `Debes seleccionar ${plan.classesPerWeek} días`,
+        );
+      }
+
+      // 🔒 validar rango horario
+      if (
+        fixedHour < plan.weekdayStartHour ||
+        fixedHour > plan.weekdayEndHour
+      ) {
+        throw new BadRequestException('Horario fuera de rango del plan');
+      }
+
+      student.weekDays = weekDays;
+      student.fixedHour = fixedHour;
+
+      return this.studentRepo.save(student);
+    }
+
+    // ==============================
+    // 🟣 CLASS
+    // ==============================
+    if (plan.type === 'CLASS') {
       throw new BadRequestException(
-        `Debes seleccionar exactamente ${student.plan.classesPerWeek} días`,
+        'Este plan se agenda por clases, no por perfil',
       );
     }
 
-    student.weekDays = weekDays;
-    student.fixedHour = fixedHour;
-
-    return this.studentRepo.save(student);
+    throw new BadRequestException('Tipo de plan no válido');
   }
 
   async addFreeSchedule(userId: number, date: string, hour: string) {
@@ -300,8 +359,15 @@ export class StudentsService {
       throw new NotFoundException('Student not found');
     }
 
-    if (student.plan.requiresTeacher) {
-      throw new BadRequestException('Este plan no permite agenda libre');
+    if (student.plan.type !== 'FREE') {
+      throw new BadRequestException('Solo planes FREE pueden usar esto');
+    }
+
+    const plan = student.plan;
+
+    // 🔒 validar rango
+    if (hour < plan.weekdayStartHour || hour > plan.weekdayEndHour) {
+      throw new BadRequestException('Horario fuera de rango del plan');
     }
 
     await this.freeScheduleRepo
@@ -309,7 +375,7 @@ export class StudentsService {
       .insert()
       .into(FreeSchedule)
       .values({
-        studentId: student.id, // 👈 OJO: NO pasar student
+        studentId: student.id,
         date,
         hour,
       })

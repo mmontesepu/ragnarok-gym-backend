@@ -18,7 +18,6 @@ export class BookingsService {
   ) {}
 
   async create(studentId: number, slotId: number, date: string) {
-    // 1. VALIDAR FECHA PASADA
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -38,7 +37,6 @@ export class BookingsService {
       throw new BadRequestException('Schedule slot not found');
     }
 
-    // 🔒 DUPLICADO MISMO DÍA
     const existingBooking = await this.bookingRepo.findOne({
       where: {
         student: { id: studentId },
@@ -53,7 +51,6 @@ export class BookingsService {
       );
     }
 
-    // 🔒 VALIDAR PLAN SEMANAL
     const startOfWeek = new Date(date);
     startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
 
@@ -74,7 +71,6 @@ export class BookingsService {
       throw new BadRequestException('Weekly plan limit reached');
     }
 
-    // ✅ SOLO CREAR BOOKING
     const booking = this.bookingRepo.create({
       student,
       slot,
@@ -85,7 +81,6 @@ export class BookingsService {
     return this.bookingRepo.save(booking);
   }
 
-  // ✅ EXISTENTES (para que el controller compile)
   findAll() {
     return this.bookingRepo.find({
       relations: ['student', 'student.user', 'slot', 'slot.teacher'],
@@ -118,7 +113,6 @@ export class BookingsService {
     return this.bookingRepo.save(booking);
   }
 
-  // ✅ NUEVO: Planificar/Actualizar semana (SYNC)
   async planWeekForStudent(userId: number, dto: PlanWeekDto) {
     const student = await this.studentsService.findByUserId(userId);
 
@@ -126,10 +120,9 @@ export class BookingsService {
       throw new BadRequestException('Student not found or inactive');
     }
 
-    // Solo planes con profesor
-    if (!student.plan.requiresTeacher) {
+    if (student.plan.type !== 'PERSONALIZED') {
       throw new BadRequestException(
-        'Este plan no usa agenda con profesor. Debes guardar días y horario en tu perfil.',
+        'Este plan no usa agenda semanal fija con profesor.',
       );
     }
 
@@ -147,7 +140,6 @@ export class BookingsService {
       throw new BadRequestException('Weekly limit exceeded');
     }
 
-    // Slot fijo del alumno (profesor + hora fija)
     const slot = await this.slotsService.findByTeacherAndHour(
       student.teacher.id,
       student.fixedHour,
@@ -157,7 +149,6 @@ export class BookingsService {
       throw new BadRequestException('Schedule slot not found');
     }
 
-    // Semana LUN-SAB (tu app trabaja L-S)
     const weekStart = new Date(`${dto.weekStart}T00:00:00`);
     const monday = this.normalizeToMonday(weekStart);
     const saturday = new Date(monday);
@@ -166,10 +157,7 @@ export class BookingsService {
     const from = monday.toISOString().slice(0, 10);
     const to = saturday.toISOString().slice(0, 10);
 
-    // Fechas seleccionadas (YYYY-MM-DD)
-    const selectedDates = dto.days
-      .map((day) => this.resolveDate(from, day)) // from ya es lunes
-      .map((d) => d); // iso date
+    const selectedDates = dto.days.map((day) => this.resolveDate(from, day));
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -184,10 +172,8 @@ export class BookingsService {
       }
     }
 
-    // Evitar duplicados si viene repetido
     const selectedSet = new Set(selectedDates);
 
-    // Traer bookings existentes de ESA semana para ese slot fijo
     const existing = await this.bookingRepo.find({
       where: {
         student: { id: student.id },
@@ -199,7 +185,6 @@ export class BookingsService {
 
     const existingByDate = new Map(existing.map((b) => [b.date, b]));
 
-    // 1) DELETE: los que existen pero ya no están seleccionados
     const toDeleteIds = existing
       .filter((b) => !selectedSet.has(b.date))
       .map((b) => b.id);
@@ -208,7 +193,6 @@ export class BookingsService {
       await this.bookingRepo.delete(toDeleteIds);
     }
 
-    // 2) INSERT: los que están seleccionados pero no existen
     const toInsertDates = Array.from(selectedSet).filter(
       (d) => !existingByDate.has(d),
     );
@@ -221,7 +205,6 @@ export class BookingsService {
         status: BookingStatus.BOOKED,
       }));
 
-      // Insert masivo (no revienta si ya existen porque filtramos antes)
       await this.bookingRepo
         .createQueryBuilder()
         .insert()
@@ -230,7 +213,6 @@ export class BookingsService {
         .execute();
     }
 
-    // 3) Respuesta final: devolver cómo quedó la semana
     const final = await this.bookingRepo.find({
       where: {
         student: { id: student.id },
@@ -258,16 +240,407 @@ export class BookingsService {
     };
   }
 
-  // Helper: normaliza una fecha a LUNES de esa semana
+  async createClassBooking(
+    userId: number,
+    body: { date: string; hour: string },
+  ) {
+    const { date, hour } = body;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException('date must be YYYY-MM-DD');
+    }
+
+    const normalizedHour = this.normalizeHour(hour);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const bookingDate = new Date(`${date}T00:00:00`);
+    if (bookingDate < today) {
+      throw new BadRequestException('No puedes reservar fechas pasadas');
+    }
+
+    const student = await this.studentsService.findByUserId(userId);
+
+    if (!student || !student.active) {
+      throw new BadRequestException('Student not found or inactive');
+    }
+
+    if (student.plan.type !== 'CLASS') {
+      throw new BadRequestException('Solo planes CLASS pueden usar esto');
+    }
+
+    if (!student.teacher) {
+      throw new BadRequestException('Alumno sin profesor asignado');
+    }
+
+    const plan = student.plan;
+    const teacher = student.teacher;
+
+    // =====================================================
+    // NUEVA LÓGICA:
+    // Para CLASS no validamos el día exacto del plan.
+    // Solo validamos que la hora elegida exista dentro de
+    // las horas definidas para el plan.
+    // =====================================================
+    const allowedHours = [
+      ...new Set(
+        (plan.schedules || [])
+          .map((s) => this.normalizeHour(s.hour))
+          .filter(Boolean),
+      ),
+    ];
+
+    if (allowedHours.length > 0 && !allowedHours.includes(normalizedHour)) {
+      throw new BadRequestException(
+        `Horario no válido para este plan. Horarios permitidos: ${allowedHours.join(', ')}`,
+      );
+    }
+
+    console.log('📅 BOOKING DEBUG', {
+      studentId: student.id,
+      teacherId: teacher.id,
+      date,
+      hour,
+      normalizedHour,
+      allowedHours,
+      planSchedules: plan.schedules || [],
+    });
+
+    // Debe existir el slot del profesor para esa hora
+    const slot = await this.slotsService.findByTeacherAndHour(
+      teacher.id,
+      normalizedHour,
+    );
+
+    if (!slot) {
+      console.log('❌ SLOT NO ENCONTRADO', {
+        teacherId: teacher.id,
+        hour: normalizedHour,
+      });
+
+      throw new BadRequestException(
+        `No existe un slot del profesor para la hora ${normalizedHour}`,
+      );
+    }
+
+    // Un alumno no puede reservar dos veces el mismo día
+    const normalizedDate = date;
+
+    console.log('🧪 CLASS BOOKING INPUT', {
+      rawDate: date,
+      normalizedDate,
+      hour,
+      studentId: student.id,
+    });
+
+    const existingForSameDay = await this.bookingRepo.find({
+      where: {
+        student: { id: student.id },
+      },
+      relations: ['slot'],
+      order: { date: 'ASC' as any },
+    });
+
+    console.log(
+      '🧪 EXISTING BOOKINGS FOR STUDENT',
+      existingForSameDay.map((b) => ({
+        id: b.id,
+        date: b.date,
+        hour: b.slot?.hour,
+      })),
+    );
+
+    const existing = await this.bookingRepo.findOne({
+      where: {
+        student: { id: student.id },
+        date: normalizedDate,
+      },
+    });
+
+    console.log('🧪 EXISTING MATCH', existing);
+
+    if (existing) {
+      throw new BadRequestException('Ya tienes una clase agendada ese día');
+    }
+
+    // Validar límite semanal
+    const monday = this.normalizeToMonday(new Date(`${date}T00:00:00`));
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const from = monday.toISOString().slice(0, 10);
+    const to = saturday.toISOString().slice(0, 10);
+
+    const count = await this.bookingRepo.count({
+      where: {
+        student: { id: student.id },
+        date: Between(from, to),
+      },
+    });
+
+    if (count >= plan.classesPerWeek) {
+      throw new BadRequestException('Límite semanal alcanzado');
+    }
+
+    const booking = this.bookingRepo.create({
+      student,
+      slot,
+      date: normalizedDate,
+      status: BookingStatus.BOOKED,
+    });
+
+    return this.bookingRepo.save(booking);
+  }
+
+  async replaceClassWeek(
+    userId: number,
+    body: { weekStart: string; days: { date: string; hour: string }[] },
+  ) {
+    const { weekStart, days } = body;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+      throw new BadRequestException('weekStart must be YYYY-MM-DD');
+    }
+
+    const student = await this.studentsService.findByUserId(userId);
+
+    if (!student || !student.active) {
+      throw new BadRequestException('Student not found or inactive');
+    }
+
+    if (student.plan.type !== 'CLASS') {
+      throw new BadRequestException('Solo planes CLASS pueden usar esto');
+    }
+
+    if (!student.teacher) {
+      throw new BadRequestException('Alumno sin profesor asignado');
+    }
+
+    const plan = student.plan;
+    const teacher = student.teacher;
+
+    if (!Array.isArray(days)) {
+      throw new BadRequestException('days must be an array');
+    }
+
+    const monday = this.normalizeToMonday(new Date(`${weekStart}T00:00:00`));
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const from = monday.toISOString().slice(0, 10);
+    const to = saturday.toISOString().slice(0, 10);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayIso = today.toISOString().slice(0, 10);
+
+    const allowedHours = [
+      ...new Set(
+        (plan.schedules || [])
+          .map((s) => this.normalizeHour(s.hour))
+          .filter(Boolean),
+      ),
+    ];
+
+    const normalizedRequested = days.map((d) => ({
+      date: d.date,
+      hour: this.normalizeHour(d.hour),
+    }));
+
+    if (normalizedRequested.length > plan.classesPerWeek) {
+      throw new BadRequestException('Límite semanal alcanzado');
+    }
+
+    for (const item of normalizedRequested) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) {
+        throw new BadRequestException(`Fecha inválida: ${item.date}`);
+      }
+
+      if (item.date < from || item.date > to) {
+        throw new BadRequestException(
+          `La fecha ${item.date} no pertenece a la semana seleccionada`,
+        );
+      }
+
+      if (item.date < todayIso) {
+        throw new BadRequestException(
+          `No puedes modificar fechas pasadas (${item.date})`,
+        );
+      }
+
+      if (allowedHours.length > 0 && !allowedHours.includes(item.hour)) {
+        throw new BadRequestException(
+          `Horario no válido para este plan: ${item.hour}`,
+        );
+      }
+    }
+
+    const requestedDates = normalizedRequested.map((d) => d.date);
+    const uniqueDates = new Set(requestedDates);
+
+    if (uniqueDates.size !== requestedDates.length) {
+      throw new BadRequestException(
+        'No puedes enviar dos clases para el mismo día',
+      );
+    }
+
+    const existing = await this.bookingRepo.find({
+      where: {
+        student: { id: student.id },
+        date: Between(from, to),
+      },
+      relations: ['slot', 'slot.teacher'],
+      order: { date: 'ASC' as any },
+    });
+
+    const pastBookings = existing.filter((b) => b.date < todayIso);
+    const futureBookings = existing.filter((b) => b.date >= todayIso);
+
+    const requestedMap = new Map(
+      normalizedRequested.map((d) => [d.date, d.hour]),
+    );
+
+    const toDelete = futureBookings.filter((b) => {
+      const requestedHour = requestedMap.get(b.date);
+      const existingHour = this.normalizeHour(b.slot?.hour || '');
+
+      return !requestedHour || requestedHour !== existingHour;
+    });
+
+    if (toDelete.length) {
+      await this.bookingRepo.delete(toDelete.map((b) => b.id));
+    }
+
+    const remainingFuture = futureBookings.filter(
+      (b) => !toDelete.some((del) => del.id === b.id),
+    );
+
+    const existingMap = new Map(
+      remainingFuture.map((b) => [
+        b.date,
+        this.normalizeHour(b.slot?.hour || ''),
+      ]),
+    );
+
+    const toInsert: Array<{
+      student: { id: number };
+      slot: { id: number };
+      date: string;
+      status: BookingStatus;
+    }> = [];
+
+    for (const item of normalizedRequested) {
+      const currentHour = existingMap.get(item.date);
+
+      if (currentHour === item.hour) {
+        continue;
+      }
+
+      const slot = await this.slotsService.findByTeacherAndHour(
+        teacher.id,
+        item.hour,
+      );
+
+      if (!slot) {
+        throw new BadRequestException(
+          `No existe un slot del profesor para la hora ${item.hour}`,
+        );
+      }
+
+      toInsert.push({
+        student: { id: student.id },
+        slot: { id: slot.id },
+        date: item.date,
+        status: BookingStatus.BOOKED,
+      });
+    }
+
+    if (toInsert.length) {
+      await this.bookingRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Booking)
+        .values(toInsert as any)
+        .execute();
+    }
+
+    const finalItems = await this.bookingRepo.find({
+      where: {
+        student: { id: student.id },
+        date: Between(from, to),
+      },
+      relations: [
+        'student',
+        'student.user',
+        'slot',
+        'slot.teacher',
+        'slot.teacher.user',
+      ],
+      order: { date: 'ASC' as any },
+    });
+
+    return {
+      ok: true,
+      from,
+      to,
+      keptPast: pastBookings.length,
+      deleted: toDelete.length,
+      created: toInsert.length,
+      items: finalItems,
+    };
+  }
+
   private normalizeToMonday(d: Date): Date {
     const copy = new Date(d);
-    const day = copy.getDay(); // 0=Dom,1=Lun...
-    const diff = (day + 6) % 7; // Lun =>0, Mar=>1,... Dom=>6
+    const day = copy.getDay();
+    const diff = (day + 6) % 7;
     copy.setDate(copy.getDate() - diff);
     return new Date(copy.getFullYear(), copy.getMonth(), copy.getDate());
   }
 
-  // ===== Helpers privados =====
+  private dateToWeekDay(date: string): WeekDay {
+    const d = new Date(`${date}T00:00:00`);
+
+    const map: Record<number, WeekDay> = {
+      1: WeekDay.MONDAY,
+      2: WeekDay.TUESDAY,
+      3: WeekDay.WEDNESDAY,
+      4: WeekDay.THURSDAY,
+      5: WeekDay.FRIDAY,
+      6: WeekDay.SATURDAY,
+    };
+
+    const wd = map[d.getDay()];
+
+    if (!wd) {
+      throw new BadRequestException('Domingo no permitido');
+    }
+
+    return wd;
+  }
+
+  private normalizeHour(hour: string): string {
+    if (!hour) return '';
+
+    const value = hour.trim();
+
+    // Si viene como HH:mm:ss -> lo dejamos HH:mm
+    if (/^\d{2}:\d{2}:\d{2}$/.test(value)) {
+      return value.slice(0, 5);
+    }
+
+    // Si viene como H:mm -> lo normalizamos a HH:mm
+    const parts = value.split(':');
+    if (parts.length >= 2) {
+      const hh = parts[0].padStart(2, '0');
+      const mm = parts[1].padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+
+    return value;
+  }
+
   private resolveDate(weekStart: string, day: WeekDay): string {
     const base = new Date(weekStart);
 
@@ -322,11 +695,11 @@ export class BookingsService {
       }
 
       map.get(hour).students.push({
-        bookingId: b.id, // 🔥 CLAVE
+        bookingId: b.id,
         firstName: b.student.firstName,
         lastName: b.student.lastName,
         email: b.student.user.email,
-        status: b.status, // 🔥 CLAVE
+        status: b.status,
       });
     }
 

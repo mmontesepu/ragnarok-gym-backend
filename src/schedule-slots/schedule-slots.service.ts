@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ScheduleSlot } from './schedule-slot.entity';
 import { Teacher, TeacherTurn } from '../teachers/teacher.entity';
+import { Plan } from '../plans/plan.entity';
 
 @Injectable()
 export class ScheduleSlotsService {
@@ -18,7 +19,6 @@ export class ScheduleSlotsService {
       order: { hour: 'ASC' },
     });
 
-    // Calcula cupo dinámico desde students
     const slotsWithCapacity = await Promise.all(
       slots.map(async (slot) => {
         const count = await this.slotRepo.manager.count('students', {
@@ -31,7 +31,7 @@ export class ScheduleSlotsService {
 
         return {
           ...slot,
-          currentCapacity: count, // 👈 recalculado real
+          currentCapacity: count,
         };
       }),
     );
@@ -39,10 +39,22 @@ export class ScheduleSlotsService {
     return slotsWithCapacity;
   }
 
-  // 🔹 BUSCAR UN HORARIO
+  // 🔹 BUSCAR SLOT POR ID
   async findOne(id: number) {
     return this.slotRepo.findOne({
       where: { id },
+      relations: ['teacher'],
+    });
+  }
+
+  // 🔹 BUSCAR SLOT POR PROFESOR + HORA
+  async findByTeacherAndHour(teacherId: number, hour: string) {
+    return this.slotRepo.findOne({
+      where: {
+        teacher: { id: teacherId },
+        hour,
+        active: true,
+      },
       relations: ['teacher'],
     });
   }
@@ -65,7 +77,7 @@ export class ScheduleSlotsService {
     }
   }
 
-  // 🔹 GENERAR HORARIOS AUTOMÁTICOS AL CREAR PROFESOR
+  // 🔹 GENERAR HORARIOS AUTOMÁTICOS AL CREAR PROFESOR PERSONALIZED
   async createSlotsForTeacher(teacher: Teacher) {
     const ranges =
       teacher.turn === TeacherTurn.MORNING
@@ -92,14 +104,43 @@ export class ScheduleSlotsService {
     return this.slotRepo.save(slots);
   }
 
-  async findByTeacherAndHour(teacherId: number, hour: string) {
-    return this.slotRepo.findOne({
-      where: {
-        teacher: { id: teacherId },
-        hour,
-        active: true,
-      },
-      relations: ['teacher'],
-    });
+  // 🔹 GENERAR SLOTS PARA PROFESOR CLASS DESDE LOS HORARIOS DE SUS PLANES
+  async createSlotsForClassTeacher(teacher: Teacher, plans: Plan[]) {
+    const hoursSet = new Set<string>();
+
+    for (const plan of plans) {
+      for (const schedule of plan.schedules || []) {
+        hoursSet.add(schedule.hour);
+      }
+    }
+
+    const hours = Array.from(hoursSet);
+
+    if (hours.length === 0) {
+      console.log('⚠️ No se encontraron horas para crear slots CLASS', {
+        teacherId: teacher.id,
+        plans,
+      });
+      return;
+    }
+
+    const slots: ScheduleSlot[] = [];
+
+    for (const hour of hours) {
+      slots.push(
+        this.slotRepo.create({
+          teacher,
+          turn: TeacherTurn.EVENING, // 🔥 IMPORTANTE
+          hour,
+          maxCapacity: 20,
+          currentCapacity: 0,
+          active: true,
+        }),
+      );
+    }
+
+    console.log('🔥 Slots CLASS creados:', hours);
+
+    return this.slotRepo.save(slots);
   }
 }

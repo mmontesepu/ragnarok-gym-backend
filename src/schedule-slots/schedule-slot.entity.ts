@@ -1,24 +1,23 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
-import { Teacher } from '../teachers/teacher.entity';
-import { TeacherTurn } from '../teachers/teacher.entity';
+import { Teacher, TeacherTurn } from '../teachers/teacher.entity';
 
 @Entity('schedule_slots')
 export class ScheduleSlot {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Teacher)
+  @ManyToOne(() => Teacher, { eager: true, onDelete: 'CASCADE' })
   teacher: Teacher;
 
   @Column({
     type: 'enum',
     enum: TeacherTurn,
-    enumName: 'schedule_slot_turn_enum',
+    nullable: true,
   })
-  turn: TeacherTurn;
+  turn: TeacherTurn | null;
 
-  @Column()
-  hour: string; // "18:00"
+  @Column({ type: 'varchar', length: 5 })
+  hour: string;
 
   @Column({ default: 5 })
   maxCapacity: number;

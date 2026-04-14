@@ -16,6 +16,7 @@ import { PlanWeekDto } from './dto/plan-week.dto';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/user-role.enum';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('bookings')
 export class BookingsController {
@@ -70,5 +71,20 @@ export class BookingsController {
   @Get('teacher/daily')
   getTeacherDailySchedule(@Req() req, @Query('date') date: string) {
     return this.bookingsService.getTeacherDailySchedule(req.user.userId, date);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('class')
+  createClassBooking(@Req() req, @Body() body: { date: string; hour: string }) {
+    return this.bookingsService.createClassBooking(req.user.userId, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('class-week')
+  async replaceClassWeek(
+    @Req() req: any,
+    @Body() body: { weekStart: string; days: { date: string; hour: string }[] },
+  ) {
+    return this.bookingsService.replaceClassWeek(req.user.sub, body);
   }
 }
