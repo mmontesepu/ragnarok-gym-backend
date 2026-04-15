@@ -85,7 +85,7 @@ export class TeachersController {
   @Roles(UserRole.TEACHER)
   @Get('my-students')
   getMyStudents(@Req() req) {
-    const userId = req.user.sub;
+    const userId = req.user.userId;
     return this.teachersService.getMyStudents(userId);
   }
 
@@ -96,7 +96,7 @@ export class TeachersController {
   @Roles(UserRole.TEACHER)
   @Get('my-schedule')
   getMySchedule(@Req() req, @Query('date') date: string) {
-    const userId = req.user.sub;
+    const userId = req.user.userId;
     return this.teachersService.getMySchedule(userId, date);
   }
 }

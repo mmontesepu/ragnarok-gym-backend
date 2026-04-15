@@ -14,6 +14,7 @@ import { FreeScheduleModule } from './free-schedules/free-schedule.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { SeedService } from './seed/seed.service';
 import { User } from './users/user.entity';
+import { EventsModule } from './events/events.module';
 
 @Module({
   imports: [
@@ -50,6 +51,8 @@ import { User } from './users/user.entity';
     FreeScheduleModule,
 
     AttendanceModule,
+
+    EventsModule,
   ],
   providers: [SeedService], // 👈 IMPORTANTE
 })

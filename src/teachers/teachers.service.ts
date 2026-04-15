@@ -197,19 +197,44 @@ export class TeachersService {
   async getMyStudents(userId: number) {
     const teacher = await this.teacherRepo.findOne({
       where: { user: { id: userId } },
+      relations: ['plans'],
     });
 
     if (!teacher) {
       return [];
     }
 
-    return this.studentRepo.find({
-      where: { teacher: { id: teacher.id }, active: true },
-      relations: ['user', 'plan'],
-      order: { fixedHour: 'ASC' },
-    });
-  }
+    // ===============================
+    // 👨‍🏫 PROFESOR PERSONALIZED
+    // ===============================
+    if (teacher.type === TeacherType.PERSONALIZED) {
+      return this.studentRepo.find({
+        where: {
+          teacher: { id: teacher.id },
+          active: true,
+        },
+        relations: ['user', 'plan'],
+        order: { fixedHour: 'ASC' },
+      });
+    }
 
+    // ===============================
+    // 🥊 PROFESOR CLASS
+    // ===============================
+    if (teacher.type === TeacherType.CLASS) {
+      const planIds = teacher.plans.map((p) => p.id);
+
+      return this.studentRepo.find({
+        where: {
+          plan: { id: In(planIds) },
+          active: true,
+        },
+        relations: ['user', 'plan'],
+      });
+    }
+
+    return [];
+  }
   // ===============================
   // 📅 AGENDA DEL PROFESOR
   // ===============================
@@ -250,5 +275,7 @@ export class TeachersService {
     return Array.from(scheduleMap.values()).sort((a, b) =>
       a.hour.localeCompare(b.hour),
     );
+    console.log('USER ID:', userId);
+    console.log('TEACHER:', teacher);
   }
 }
