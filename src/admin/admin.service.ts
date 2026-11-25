@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
 import { Booking } from '../bookings/booking.entity';
+import { validateDate } from '../common/utils/date.util';
 
 @Injectable()
 export class AdminService {
@@ -11,14 +13,11 @@ export class AdminService {
   ) {}
 
   async getDailySchedule(date: string) {
+    validateDate(date);
+
     const bookings = await this.bookingRepo.find({
       where: { date },
-      relations: [
-        'slot',
-        'slot.teacher',
-        'student',
-        'student.user',
-      ],
+      relations: ['slot', 'slot.teacher', 'student', 'student.user'],
     });
 
     const scheduleMap = new Map<string, any>();
@@ -30,6 +29,7 @@ export class AdminService {
         scheduleMap.set(key, {
           hour: booking.slot.hour,
           teacher: {
+            id: booking.slot.teacher.id,
             firstName: booking.slot.teacher.firstName,
             lastName: booking.slot.teacher.lastName,
           },
@@ -38,6 +38,8 @@ export class AdminService {
       }
 
       scheduleMap.get(key).students.push({
+        bookingId: booking.id,
+        studentId: booking.student.id,
         firstName: booking.student.firstName,
         lastName: booking.student.lastName,
         email: booking.student.user.email,

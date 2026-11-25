@@ -1,30 +1,65 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
+
+import { isPasswordHash, verifyPassword } from './password.util';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
-    private jwtService: JwtService,
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
   ) {}
 
   async login(email: string, password: string) {
-    const user = await this.usersService.findByEmail(email);
+    // =====================================================
+    // BUSCAR USUARIO CON CONTRASEÑA
+    // =====================================================
+
+    const user = await this.usersService.findByEmailForLogin(email);
 
     if (!user) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    if (user.password !== password) {
+    // =====================================================
+    // VALIDAR CONTRASEÑA
+    // COMPATIBLE CON TEXTO PLANO Y BCRYPT
+    // =====================================================
+
+    const validPassword = await verifyPassword(password, user.password);
+
+    if (!validPassword) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // 🔒 BLOQUEO REAL AQUÍ
+    // =====================================================
+    // VALIDAR CUENTA ACTIVA
+    // =====================================================
+
     if (!user.active) {
       throw new UnauthorizedException('Cuenta bloqueada o plan vencido');
     }
+
+    // =====================================================
+    // MIGRAR CONTRASEÑA ANTIGUA AUTOMÁTICAMENTE
+    // =====================================================
+
+    if (!isPasswordHash(user.password)) {
+      const migrated = await this.usersService.migrateLegacyPassword(
+        user.id,
+        password,
+      );
+
+      if (!migrated) {
+        throw new UnauthorizedException('Vuelve a iniciar sesión');
+      }
+    }
+
+    // =====================================================
+    // GENERAR JWT
+    // =====================================================
 
     const payload = {
       sub: user.id,

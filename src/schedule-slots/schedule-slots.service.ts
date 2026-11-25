@@ -1,6 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
+
 import { ScheduleSlot } from './schedule-slot.entity';
 import { Teacher, TeacherTurn } from '../teachers/teacher.entity';
 import { Plan } from '../plans/plan.entity';
@@ -12,7 +14,10 @@ export class ScheduleSlotsService {
     private readonly slotRepo: Repository<ScheduleSlot>,
   ) {}
 
-  // 🔹 LISTAR TODOS LOS HORARIOS
+  // =====================================================
+  // LISTAR TODOS LOS HORARIOS
+  // =====================================================
+
   async findAll() {
     const slots = await this.slotRepo.find({
       relations: ['teacher', 'teacher.user'],
@@ -39,7 +44,10 @@ export class ScheduleSlotsService {
     return slotsWithCapacity;
   }
 
-  // 🔹 BUSCAR SLOT POR ID
+  // =====================================================
+  // BUSCAR SLOT POR ID
+  // =====================================================
+
   async findOne(id: number) {
     return this.slotRepo.findOne({
       where: { id },
@@ -47,7 +55,10 @@ export class ScheduleSlotsService {
     });
   }
 
-  // 🔹 BUSCAR SLOT POR PROFESOR + HORA
+  // =====================================================
+  // BUSCAR SLOT POR PROFESOR Y HORA
+  // =====================================================
+
   async findByTeacherAndHour(teacherId: number, hour: string) {
     return this.slotRepo.findOne({
       where: {
@@ -59,7 +70,10 @@ export class ScheduleSlotsService {
     });
   }
 
-  // 🔹 INCREMENTAR CUPO DE FORMA SEGURA
+  // =====================================================
+  // INCREMENTAR CUPO DE FORMA SEGURA
+  // =====================================================
+
   async incrementCapacity(slotId: number) {
     const result = await this.slotRepo
       .createQueryBuilder()
@@ -77,12 +91,19 @@ export class ScheduleSlotsService {
     }
   }
 
-  // 🔹 GENERAR HORARIOS AUTOMÁTICOS AL CREAR PROFESOR PERSONALIZED
-  async createSlotsForTeacher(teacher: Teacher) {
+  // =====================================================
+  // GENERAR HORARIOS PERSONALIZED
+  // =====================================================
+
+  async createSlotsForTeacher(teacher: Teacher, manager?: EntityManager) {
+    const repository = manager
+      ? manager.getRepository(ScheduleSlot)
+      : this.slotRepo;
+
     const ranges =
       teacher.turn === TeacherTurn.MORNING
-        ? { start: 6, end: 14 } // 06:00 a 13:00
-        : { start: 15, end: 22 }; // 15:00 a 21:00
+        ? { start: 6, end: 14 }
+        : { start: 15, end: 22 };
 
     const slots: ScheduleSlot[] = [];
 
@@ -90,7 +111,7 @@ export class ScheduleSlotsService {
       const hourLabel = `${hour.toString().padStart(2, '0')}:00`;
 
       slots.push(
-        this.slotRepo.create({
+        repository.create({
           teacher,
           turn: teacher.turn,
           hour: hourLabel,
@@ -101,11 +122,22 @@ export class ScheduleSlotsService {
       );
     }
 
-    return this.slotRepo.save(slots);
+    return repository.save(slots);
   }
 
-  // 🔹 GENERAR SLOTS PARA PROFESOR CLASS DESDE LOS HORARIOS DE SUS PLANES
-  async createSlotsForClassTeacher(teacher: Teacher, plans: Plan[]) {
+  // =====================================================
+  // GENERAR HORARIOS CLASS
+  // =====================================================
+
+  async createSlotsForClassTeacher(
+    teacher: Teacher,
+    plans: Plan[],
+    manager?: EntityManager,
+  ) {
+    const repository = manager
+      ? manager.getRepository(ScheduleSlot)
+      : this.slotRepo;
+
     const hoursSet = new Set<string>();
 
     for (const plan of plans) {
@@ -117,20 +149,18 @@ export class ScheduleSlotsService {
     const hours = Array.from(hoursSet);
 
     if (hours.length === 0) {
-      console.log('⚠️ No se encontraron horas para crear slots CLASS', {
-        teacherId: teacher.id,
-        plans,
-      });
-      return;
+      throw new BadRequestException(
+        'Los planes seleccionados no tienen horarios configurados',
+      );
     }
 
     const slots: ScheduleSlot[] = [];
 
     for (const hour of hours) {
       slots.push(
-        this.slotRepo.create({
+        repository.create({
           teacher,
-          turn: TeacherTurn.EVENING, // 🔥 IMPORTANTE
+          turn: TeacherTurn.EVENING,
           hour,
           maxCapacity: 20,
           currentCapacity: 0,
@@ -139,8 +169,6 @@ export class ScheduleSlotsService {
       );
     }
 
-    console.log('🔥 Slots CLASS creados:', hours);
-
-    return this.slotRepo.save(slots);
+    return repository.save(slots);
   }
 }

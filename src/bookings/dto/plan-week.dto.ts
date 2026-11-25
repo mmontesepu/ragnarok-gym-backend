@@ -1,6 +1,26 @@
+import {
+  IsArray,
+  IsString,
+  Matches,
+  ArrayNotEmpty,
+  ArrayUnique,
+  ArrayMaxSize,
+  IsEnum,
+} from 'class-validator';
+
 import { WeekDay } from './week-day.enum';
 
 export class PlanWeekDto {
-  weekStart: string; // "YYYY-MM-DD" (una fecha cualquiera de la semana)
-  days: WeekDay[]; // ["MONDAY", "WEDNESDAY", ...]
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'weekStart debe tener formato YYYY-MM-DD',
+  })
+  weekStart: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @ArrayMaxSize(6)
+  @IsEnum(WeekDay, { each: true })
+  days: WeekDay[];
 }

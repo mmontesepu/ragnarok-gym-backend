@@ -7,38 +7,64 @@ import {
   Get,
   Query,
 } from '@nestjs/common';
+
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/user-role.enum';
+
 import { FreeScheduleService } from './free-schedule.service';
 import { ReplaceFreeWeekDto } from './dto/replace-week.dto';
 
 @Controller('students/me/free-schedule')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class FreeScheduleController {
   constructor(private readonly service: FreeScheduleService) {}
 
-  // 🔒 EXISTENTE → NO TOCAR
+  // =====================================================
+  // GUARDAR DÍA FREE
+  // =====================================================
+
   @Post()
-  saveDay(@Req() req, @Body() body: { date: string; hour: string }) {
-    return this.service.saveDay(req.user.studentId, body.date, body.hour);
+  @Roles(UserRole.STUDENT)
+  saveDay(
+    @Req() req,
+    @Body()
+    body: {
+      date: string;
+      hour: string;
+    },
+  ) {
+    return this.service.saveDayForUser(req.user.userId, body.date, body.hour);
   }
 
-  // 🆕 NUEVO → reemplazar semana completa (PLAN LIBRE)
+  // =====================================================
+  // REEMPLAZAR SEMANA FREE
+  // =====================================================
+
   @Post('week')
+  @Roles(UserRole.STUDENT)
   replaceWeek(@Req() req, @Body() dto: ReplaceFreeWeekDto) {
-    return this.service.replaceWeek(
-      req.user.userId, // 🔥 NO studentId
-      dto.weekStart,
-      dto.days,
-    );
+    return this.service.replaceWeek(req.user.userId, dto.weekStart, dto.days);
   }
+
+  // =====================================================
+  // AGENDA DIARIA
+  // =====================================================
 
   @Get('daily')
-  async getDaily(@Query('date') date: string) {
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  getDaily(@Query('date') date: string) {
     return this.service.getDailyGrouped(date);
   }
 
-  @Get('/admin/daily')
-  async getDailyAdmin(@Query('date') date: string) {
+  // =====================================================
+  // AGENDA ADMINISTRATIVA
+  // =====================================================
+
+  @Get('admin/daily')
+  @Roles(UserRole.ADMIN)
+  getDailyAdmin(@Query('date') date: string) {
     return this.service.getDailyGrouped(date);
   }
 }

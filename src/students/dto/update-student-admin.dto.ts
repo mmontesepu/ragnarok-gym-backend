@@ -10,6 +10,11 @@ export class UpdateStudentAdminDto {
   @IsString()
   lastName?: string;
 
+  // NUEVO: RUT DEL ALUMNO
+  @IsOptional()
+  @IsString()
+  rut?: string;
+
   @IsOptional()
   @IsNumber()
   planId?: number;

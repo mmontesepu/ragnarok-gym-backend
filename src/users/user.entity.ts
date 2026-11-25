@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+
 import { UserRole } from './user-role.enum';
 
 @Entity('users')
@@ -9,7 +10,9 @@ export class User {
   @Column({ unique: true })
   email: string;
 
-  @Column()
+  // SEGURIDAD: NO RECUPERAR CONTRASEÑA
+  // EN CONSULTAS NORMALES
+  @Column({ select: false })
   password: string;
 
   @Column({
@@ -19,5 +22,5 @@ export class User {
   role: UserRole;
 
   @Column({ default: true })
-  active: boolean; // 👈 NUEVO
+  active: boolean;
 }

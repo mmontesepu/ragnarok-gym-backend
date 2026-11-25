@@ -7,6 +7,7 @@ import { Student } from '../students/student.entity';
 import { WeekDay } from '../students/week-day.enum';
 import { UserRole } from '../users/user-role.enum';
 import { FreeSchedule } from '../free-schedules/free-schedule.entity';
+import { validateDate, addDays } from '../common/utils/date.util';
 
 type ScheduleItem = {
   date: string;
@@ -37,27 +38,59 @@ export class ScheduleService {
   // ======================================================
   // ENTRY POINT
   // ======================================================
+
   async getSchedule(
-    user: { userId: number; role: string },
-    params: { date?: string; from?: string; to?: string },
+    user: {
+      userId: number;
+      role: string;
+    },
+    params: {
+      date?: string;
+      from?: string;
+      to?: string;
+    },
   ) {
     const { date, from, to } = params;
 
     if (date) {
+      validateDate(date);
+
       return this.getScheduleByDate(user, date);
     }
 
     if (from && to) {
-      const result: { date: string; items: ScheduleItem[] }[] = [];
+      validateDate(from);
+      validateDate(to);
 
-      let current = new Date(`${from}T00:00:00`);
-      const end = new Date(`${to}T00:00:00`);
+      if (from > to) {
+        throw new BadRequestException('Rango de fechas inválido');
+      }
 
-      while (current <= end) {
-        const d = current.toISOString().slice(0, 10);
-        const dayResult = await this.getScheduleByDate(user, d);
+      const start = new Date(`${from}T00:00:00Z`);
+
+      const end = new Date(`${to}T00:00:00Z`);
+
+      const difference = (end.getTime() - start.getTime()) / 86400000;
+
+      if (difference > 30) {
+        throw new BadRequestException(
+          'El rango máximo permitido es de 31 días',
+        );
+      }
+
+      const result: {
+        date: string;
+        items: ScheduleItem[];
+      }[] = [];
+
+      let current = from;
+
+      while (current <= to) {
+        const dayResult = await this.getScheduleByDate(user, current);
+
         result.push(dayResult);
-        current.setDate(current.getDate() + 1);
+
+        current = addDays(current, 1);
       }
 
       return result;
@@ -73,9 +106,7 @@ export class ScheduleService {
     user: { userId: number; role: string },
     date: string,
   ) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new BadRequestException('date must be YYYY-MM-DD');
-    }
+    validateDate(date);
 
     if (user.role === UserRole.STUDENT) {
       return this.getStudentScheduleByDate(user.userId, date);
@@ -101,7 +132,7 @@ export class ScheduleService {
       relations: ['plan', 'teacher', 'teacher.user', 'user'],
     });
 
-    if (!student || !student.active) {
+    if (!student || !student.active || !student.user?.active) {
       throw new BadRequestException('Student not found or inactive');
     }
 

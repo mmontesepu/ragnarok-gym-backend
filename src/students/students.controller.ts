@@ -8,13 +8,14 @@ import {
   Param,
   UseGuards,
   Req,
+  ParseIntPipe,
 } from '@nestjs/common';
+
 import { StudentsService } from './students.service';
 import { StudentTurn } from './student.entity';
 import { CreateStudentAdminDto } from './dto/create-student-admin.dto';
 import { UpdateStudentAdminDto } from './dto/update-student-admin.dto';
 
-// 🔐 AUTH & ROLES
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -22,12 +23,16 @@ import { UserRole } from '../users/user-role.enum';
 import { WeekDay } from './week-day.enum';
 
 @Controller('students')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class StudentsController {
   constructor(private readonly studentsService: StudentsService) {}
 
-  // ⚠️ ENDPOINT NORMAL (NO PROTEGIDO AÚN)
-  // (lo dejamos así para no romper flujos existentes)
+  // =====================================================
+  // CREACIÓN NORMAL — SOLO ADMIN
+  // =====================================================
+
   @Post()
+  @Roles(UserRole.ADMIN)
   create(
     @Body()
     body: {
@@ -47,30 +52,42 @@ export class StudentsController {
     );
   }
 
-  // ⚠️ LISTADO GENERAL (por ahora público)
+  // =====================================================
+  // LISTADO GENERAL — ADMIN Y PROFESOR
+  // =====================================================
+
   @Get()
+  @Roles(UserRole.ADMIN)
   findAll(@Query('search') search?: string) {
     return this.studentsService.findAll(search);
   }
 
-  // 🔐 SOLO ADMIN — CREAR ALUMNO DESDE PANEL
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  // =====================================================
+  // CREAR ALUMNO DESDE PANEL ADMIN
+  // =====================================================
+
   @Post('admin-create')
+  @Roles(UserRole.ADMIN)
   createFromAdmin(@Body() dto: CreateStudentAdminDto) {
     return this.studentsService.createFromAdmin(dto);
   }
 
-  // 🔐 SOLO ADMIN — ACTIVAR / DESACTIVAR
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  // =====================================================
+  // ACTIVAR / DESACTIVAR ALUMNO
+  // =====================================================
+
   @Patch(':id/toggle-active')
-  toggleActive(@Param('id') id: number) {
-    return this.studentsService.toggleActive(+id);
+  @Roles(UserRole.ADMIN)
+  toggleActive(@Param('id', ParseIntPipe) id: number) {
+    return this.studentsService.toggleActive(id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  // =====================================================
+  // ACTUALIZAR AGENDA SEMANAL DEL ALUMNO
+  // =====================================================
+
   @Patch('me/schedule')
+  @Roles(UserRole.STUDENT)
   updateMySchedule(
     @Req() req,
     @Body()
@@ -86,33 +103,27 @@ export class StudentsController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  // =====================================================
+  // OBTENER PERFIL DEL ALUMNO + RUT
+  // =====================================================
+
   @Get('me')
+  @Roles(UserRole.STUDENT)
   getMe(@Req() req) {
     return this.studentsService.findByUserId(req.user.userId);
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Post('me/free-schedule')
-  addFreeSchedule(
-    @Req() req,
-    @Body()
-    body: {
-      date: string;
-      hour: string;
-    },
-  ) {
-    return this.studentsService.addFreeSchedule(
-      req.user.userId,
-      body.date,
-      body.hour,
-    );
-  }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  // =====================================================
+  // ACTUALIZAR ALUMNO + RUT — SOLO ADMIN
+  // =====================================================
+
   @Patch(':id')
-  updateStudent(@Param('id') id: number, @Body() dto: UpdateStudentAdminDto) {
-    return this.studentsService.updateFromAdmin(+id, dto);
+  @Roles(UserRole.ADMIN)
+  updateStudent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateStudentAdminDto,
+  ) {
+    return this.studentsService.updateFromAdmin(id, dto);
   }
 }

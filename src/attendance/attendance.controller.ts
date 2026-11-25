@@ -1,4 +1,13 @@
-import { Controller, Post, Body, UseGuards, Param, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Param,
+  Req,
+  ParseIntPipe,
+  ValidationPipe,
+} from '@nestjs/common';
 
 import { AttendanceService } from './attendance.service';
 
@@ -7,37 +16,55 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/user-role.enum';
 
+import { ValidateDto } from './dto/validate.dto';
+
 @Controller('attendance')
-@UseGuards(JwtAuthGuard) // ✅ cualquier usuario autenticado puede generar QR
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class AttendanceController {
-  constructor(private service: AttendanceService) {}
+  constructor(private readonly service: AttendanceService) {}
 
   // =====================================================
-  // ✅ SOLO ADMIN Y PROFESOR PUEDEN VALIDAR ASISTENCIA
+  // VALIDAR ASISTENCIA
+  // COMPATIBLE CON RUT Y UUID
   // =====================================================
+
   @Post('validate')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  validate(@Body() body: any) {
-    console.log('QR RECEIVED =>', body);
-
-    return this.service.validate(body.token);
+  validate(
+    @Body(new ValidationPipe({ whitelist: true }))
+    body: ValidateDto,
+    @Req() req,
+  ) {
+    return this.service.validate(body.token, req.user.userId, req.user.role);
   }
 
   // =====================================================
-  // 🧑‍🎓 QR PARA RESERVA CON PROFESOR
-  // (alumno genera — profe/admin escanean)
+  // GENERAR QR UUID - RESERVA CON PROFESOR
+  // COMPATIBILIDAD CON VERSIONES ANTERIORES
   // =====================================================
+
   @Post('generate/booking/:id')
-  generateForBooking(@Param('id') id: number, @Body() body: { date: string }) {
-    return this.service.generateForBooking(+id, body.date);
+  @Roles(UserRole.STUDENT)
+  generateForBooking(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { date: string },
+    @Req() req,
+  ) {
+    return this.service.generateForBooking(id, body.date, req.user.userId);
   }
 
   // =====================================================
-  // 🧑‍🎓 QR PARA PLAN LIBRE
+  // GENERAR QR UUID - PLAN LIBRE
+  // COMPATIBILIDAD CON VERSIONES ANTERIORES
   // =====================================================
+
   @Post('generate/free/:id')
-  generateForFree(@Param('id') id: number, @Body() body: { date: string }) {
-    return this.service.generateForFree(+id, body.date);
+  @Roles(UserRole.STUDENT)
+  generateForFree(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { date: string },
+    @Req() req,
+  ) {
+    return this.service.generateForFree(id, body.date, req.user.userId);
   }
 }

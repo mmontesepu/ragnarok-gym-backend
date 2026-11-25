@@ -24,7 +24,7 @@ import { EventsModule } from './events/events.module';
       type: 'postgres',
       url: process.env.DATABASE_URL,
       autoLoadEntities: true,
-      synchronize: true,
+      synchronize: process.env.DB_SYNCHRONIZE === 'true',
       ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
     }),
 

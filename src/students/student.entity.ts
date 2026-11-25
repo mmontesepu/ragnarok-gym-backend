@@ -10,6 +10,7 @@ import { User } from '../users/user.entity';
 import { Plan } from '../plans/plan.entity';
 import { Teacher } from '../teachers/teacher.entity';
 import { WeekDay } from './week-day.enum';
+import { hashPassword } from '../auth/password.util';
 
 export enum StudentTurn {
   MORNING = 'MORNING',
@@ -31,12 +32,21 @@ export class Student {
   @Column({ nullable: true })
   lastName: string;
 
+  // NUEVO: RUT DEL ALUMNO
+  @Column({
+    type: 'varchar',
+    length: 12,
+    nullable: true,
+    unique: true,
+  })
+  rut: string | null;
+
   @ManyToOne(() => Plan, { eager: true })
   plan: Plan;
 
   @ManyToOne(() => Teacher, (teacher) => teacher.students, {
     eager: true,
-    nullable: true, // ✅
+    nullable: true,
   })
   teacher: Teacher | null;
 
@@ -51,7 +61,7 @@ export class Student {
     type: 'enum',
     enum: WeekDay,
     array: true,
-    nullable: true, // 👈 CLAVE
+    nullable: true,
   })
   weekDays: WeekDay[];
 

@@ -9,6 +9,11 @@ import { Event } from './event.entity';
 import { EventRegistration } from './event-registration.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { StudentsService } from '../students/students.service';
+import {
+  getTodayChile,
+  validateDate,
+  validateHour,
+} from '../common/utils/date.util';
 
 @Injectable()
 export class EventsService {
@@ -31,21 +36,30 @@ export class EventsService {
       throw new BadRequestException('La descripción es obligatoria');
     }
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dto.date)) {
-      throw new BadRequestException('date must be YYYY-MM-DD');
-    }
+    // =====================================================
+    // VALIDAR FECHA Y HORA
+    // =====================================================
 
-    if (!/^\d{2}:\d{2}$/.test(dto.hour)) {
-      throw new BadRequestException('hour must be HH:mm');
-    }
+    validateDate(dto.date);
+    validateHour(dto.hour);
+
+    // =====================================================
+    // VALIDAR CANTIDAD DE PARTICIPANTES
+    // =====================================================
 
     if (
       dto.maxParticipants !== undefined &&
       dto.maxParticipants !== null &&
-      dto.maxParticipants < 1
+      (!Number.isInteger(dto.maxParticipants) || dto.maxParticipants < 1)
     ) {
-      throw new BadRequestException('maxParticipants debe ser mayor a 0');
+      throw new BadRequestException(
+        'maxParticipants debe ser un entero mayor a 0',
+      );
     }
+
+    // =====================================================
+    // CREAR EVENTO
+    // =====================================================
 
     const event = this.eventRepo.create({
       title: dto.title.trim(),
@@ -125,60 +139,75 @@ export class EventsService {
   async register(eventId: number, userId: number) {
     const student = await this.studentsService.findByUserId(userId);
 
-    if (!student || !student.active) {
+    if (!student || !student.active || !student.user?.active) {
       throw new BadRequestException('Alumno no encontrado o inactivo');
     }
 
-    const event = await this.eventRepo.findOne({
-      where: { id: eventId },
-      relations: ['registrations', 'registrations.student'],
+    return this.eventRepo.manager.transaction(async (manager) => {
+      const eventRepository = manager.getRepository(Event);
+
+      const registrationRepository = manager.getRepository(EventRegistration);
+
+      // Bloquear evento durante la inscripción
+
+      const event = await eventRepository
+        .createQueryBuilder('event')
+        .setLock('pessimistic_write')
+        .where('event.id = :eventId', {
+          eventId,
+        })
+        .getOne();
+
+      if (!event || !event.active) {
+        throw new NotFoundException('Evento no encontrado o inactivo');
+      }
+
+      if (event.date < getTodayChile()) {
+        throw new BadRequestException(
+          'No puedes inscribirte en eventos pasados',
+        );
+      }
+
+      const existing = await registrationRepository.findOne({
+        where: {
+          event: { id: event.id },
+          student: { id: student.id },
+        },
+      });
+
+      if (existing) {
+        throw new BadRequestException('Ya estás inscrito en este evento');
+      }
+
+      const participantCount = await registrationRepository.count({
+        where: {
+          event: { id: event.id },
+        },
+      });
+
+      if (
+        event.maxParticipants !== null &&
+        event.maxParticipants !== undefined &&
+        participantCount >= event.maxParticipants
+      ) {
+        throw new BadRequestException(
+          'El evento ya no tiene cupos disponibles',
+        );
+      }
+
+      const registration = registrationRepository.create({
+        event,
+        student,
+        confirmed: true,
+      });
+
+      await registrationRepository.save(registration);
+
+      return {
+        ok: true,
+        message: 'Inscripción realizada correctamente',
+      };
     });
-
-    if (!event || !event.active) {
-      throw new NotFoundException('Evento no encontrado o inactivo');
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const eventDate = new Date(`${event.date}T00:00:00`);
-    if (eventDate < today) {
-      throw new BadRequestException('No puedes inscribirte en eventos pasados');
-    }
-
-    const existing = await this.registrationRepo.findOne({
-      where: {
-        event: { id: event.id },
-        student: { id: student.id },
-      },
-      relations: ['event', 'student'],
-    });
-
-    if (existing) {
-      throw new BadRequestException('Ya estás inscrito en este evento');
-    }
-
-    const participantCount = event.registrations?.length ?? 0;
-    if (
-      event.maxParticipants !== null &&
-      event.maxParticipants !== undefined &&
-      participantCount >= event.maxParticipants
-    ) {
-      throw new BadRequestException('El evento ya no tiene cupos disponibles');
-    }
-
-    const registration = this.registrationRepo.create({
-      event,
-      student,
-      confirmed: true,
-    });
-
-    await this.registrationRepo.save(registration);
-
-    return {
-      ok: true,
-      message: 'Inscripción realizada correctamente',
-    };
   }
 
   async unregister(eventId: number, userId: number) {
@@ -200,11 +229,7 @@ export class EventsService {
       throw new NotFoundException('No estabas inscrito en este evento');
     }
 
-    const eventDate = new Date(`${registration.event.date}T00:00:00`);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (eventDate < today) {
+    if (registration.event.date < getTodayChile()) {
       throw new BadRequestException(
         'No puedes cancelar eventos que ya ocurrieron',
       );
